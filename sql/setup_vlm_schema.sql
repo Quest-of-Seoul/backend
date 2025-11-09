@@ -38,8 +38,9 @@ ON places USING gist(ll_to_earth(latitude, longitude));
 -- 카테고리 검색 인덱스
 CREATE INDEX IF NOT EXISTS idx_places_category ON places(category);
 
--- 이름 검색 인덱스
-CREATE INDEX IF NOT EXISTS idx_places_name ON places USING gin(to_tsvector('korean', name));
+-- 이름 검색 인덱스 (단순 텍스트 검색용)
+CREATE INDEX IF NOT EXISTS idx_places_name ON places(name);
+CREATE INDEX IF NOT EXISTS idx_places_name_en ON places(name_en);
 
 -- image_vectors 테이블 (이미지 임베딩 저장)
 CREATE TABLE IF NOT EXISTS image_vectors (
