@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: quest-of-seoul-api
+    runtime: python
+    env: python
+    region: oregon  # or singapore for Asia
+    plan: free  # or starter/standard for production
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: SUPABASE_URL
+        sync: false  # Set in Render Dashboard
+      - key: SUPABASE_SERVICE_KEY
+        sync: false  # Set in Render Dashboard
+      - key: GEMINI_API_KEY
+        sync: false  # Set in Render Dashboard
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/secrets/google-tts-credentials.json
+    # Secret Files will be configured in Render Dashboard
