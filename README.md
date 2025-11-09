@@ -109,18 +109,47 @@ GET  /quest/{quest_id}               # 퀘스트 상세 정보
 **Prefix:** `/reward`
 
 ```
-GET  /reward/points/{user_id}        # 사용자 포인트 잔액 조회
+GET  /reward/points/{user_id}        # 사용자 포인트 잔액 및 거래 내역 조회
+POST /reward/points/add              # 사용자에게 포인트 추가 (수동 지급)
 GET  /reward/list                    # 사용 가능한 보상 목록
 POST /reward/claim                   # 보상 획득
 GET  /reward/claimed/{user_id}       # 획득한 보상 조회
 POST /reward/use/{reward_id}         # 보상 사용 처리
 ```
 
+#### 주요 엔드포인트 상세
+
+**GET /reward/points/{user_id}**
+- 사용자의 총 포인트 잔액 조회 (get_user_points 함수 사용)
+- 최근 거래 내역 10건 반환
+- 응답: `{ total_points: number, transactions: array }`
+
+**POST /reward/points/add**
+- 요청: `{ user_id: string, points: number, reason: string }`
+- 사용자에게 포인트 수동 지급 (관리자/이벤트용)
+- 사용자가 없으면 자동으로 users 테이블에 생성
+- 응답: 이전 잔액, 새 잔액, 추가된 포인트 반환
+
+**POST /reward/claim**
+- 요청: `{ user_id: string, reward_id: number }`
+- 포인트 충분 여부 확인 후 보상 획득
+- 포인트 차감 (음수 값으로 points 테이블에 기록)
+- QR 코드 토큰 생성 (16바이트 URL-safe)
+- user_rewards 테이블에 기록
+
 ## 6. 데이터베이스 스키마
 
 **데이터베이스:** Supabase (PostgreSQL)
 
 ### 6.1 테이블 구조
+
+#### users (사용자)
+```sql
+- id (PK, uuid)              # 사용자 고유 ID
+- email (text)               # 이메일
+- nickname (text)            # 닉네임
+- created_at (timestamp)
+```
 
 #### quests (퀘스트)
 ```sql
@@ -188,10 +217,10 @@ POST /reward/use/{reward_id}         # 보상 사용 처리
 
 ### 6.3 관계도
 ```
-Users (1) ──── (*) user_quests (*) ──── (1) quests
-Users (1) ──── (*) points
-Users (1) ──── (*) user_rewards (*) ──── (1) rewards
-Users (1) ──── (*) chat_logs
+users (1) ──── (*) user_quests (*) ──── (1) quests
+users (1) ──── (*) points
+users (1) ──── (*) user_rewards (*) ──── (1) rewards
+users (1) ──── (*) chat_logs
 ```
 
 ## 7. 외부 서비스 통합
@@ -264,9 +293,11 @@ Users (1) ──── (*) chat_logs
 
 ### 8.3 게임화 시스템
 - 퀘스트 완료로 포인트 획득
+- 수동 포인트 지급 기능 (관리자/이벤트용)
+- 포인트 잔액 조회 및 거래 내역 추적
 - 보상 카탈로그 (배지, 할인 쿠폰)
 - 보상 교환용 QR 코드 생성
-- 거래 내역 추적
+- 사용자 자동 생성 (첫 포인트 추가 시)
 
 ### 8.4 WebSocket 스트리밍
 - 실시간 TTS 오디오 스트리밍
@@ -346,11 +377,24 @@ PORT                           # 서버 포트 (기본값: 8000)
    ↓
 4. WS /docent/ws/chat - AI 도슨트와 대화
    ↓
-5. POST /quest/progress - 퀘스트 완료
+5. POST /quest/progress - 퀘스트 완료 (자동으로 포인트 적립)
    ↓
-6. POST /reward/claim - 포인트로 보상 획득
+6. GET /reward/points/{user_id} - 포인트 잔액 및 거래 내역 확인
    ↓
-7. POST /reward/use - 보상 사용 (QR 코드)
+7. POST /reward/claim - 포인트로 보상 획득
+   ↓
+8. POST /reward/use - 보상 사용 (QR 코드)
+```
+
+### 포인트 관리 워크플로우
+```
+1. 관리자/이벤트: POST /reward/points/add - 사용자에게 포인트 수동 지급
+   ↓
+2. 시스템: 사용자가 없으면 자동 생성 (users 테이블)
+   ↓
+3. GET /reward/points/{user_id} - 포인트 잔액 확인
+   ↓
+4. 응답: 총 포인트 + 최근 거래 내역 10건
 ```
 
 ### 데이터 흐름
@@ -388,5 +432,18 @@ Client Response
 
 ---
 
-**마지막 업데이트:** 2025년 11월
-**버전:** 1.0
+**마지막 업데이트:** 2025년 11월 9일
+**버전:** 1.1
+
+## 변경 이력
+
+### v1.1 (2025-11-09)
+- `users` 테이블 추가 (사용자 관리)
+- `POST /reward/points/add` 엔드포인트 추가 (수동 포인트 지급)
+- `GET /reward/points/{user_id}` 응답에 거래 내역 추가
+- 사용자 자동 생성 기능 추가
+- API 엔드포인트 상세 설명 추가
+- 포인트 관리 워크플로우 추가
+
+### v1.0 (2025-11)
+- 초기 백엔드 아키텍처 문서 작성
