@@ -3,15 +3,15 @@ Quest of Seoul - FastAPI Backend
 Main application entry point
 """
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
-from routers import docent, quest, reward
-
-# Load environment variables
+# Load environment variables FIRST (before importing routers)
 load_dotenv()
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from routers import docent, quest, reward, vlm
 
 app = FastAPI(
     title="Quest of Seoul API",
@@ -32,6 +32,7 @@ app.add_middleware(
 app.include_router(docent.router, prefix="/docent", tags=["Docent"])
 app.include_router(quest.router, prefix="/quest", tags=["Quest"])
 app.include_router(reward.router, prefix="/reward", tags=["Reward"])
+app.include_router(vlm.router, prefix="/vlm", tags=["VLM - Image Analysis"])
 
 @app.get("/")
 async def root():

@@ -2,7 +2,7 @@
 
 ## 1. 개요
 
-Quest of Seoul의 백엔드는 FastAPI 프레임워크를 사용한 위치 기반 AR 관광 애플리케이션 서버입니다. AI 기반 도슨트, 게임화된 퀘스트 시스템, 그리고 보상 메커니즘을 제공합니다.
+Quest of Seoul의 백엔드는 FastAPI 프레임워크를 사용한 위치 기반 AR 관광 애플리케이션 서버입니다. AI 기반 도슨트, VLM 이미지 분석, 게임화된 퀘스트 시스템, 그리고 보상 메커니즘을 제공합니다.
 
 ## 2. 기술 스택
 
@@ -12,11 +12,15 @@ Quest of Seoul의 백엔드는 FastAPI 프레임워크를 사용한 위치 기�
 - **Python 3.x** - 런타임 환경
 
 ### 주요 라이브러리
-- **Supabase** (v2.9.1) - PostgreSQL 데이터베이스 및 스토리지
+- **Supabase** (v2.9.1) - PostgreSQL 데이터베이스 및 스토리지 (pgvector 확장)
+- **OpenAI** (v1.0.0+) - GPT-4V Vision API (이미지 분석)
 - **Google Gemini AI** (v0.8.3) - 대화형 AI (gemini-2.5-flash 모델)
 - **Google Cloud TTS** (v2.18.0) - 음성 합성
+- **Transformers** (v4.30.0+) - CLIP 이미지 임베딩
+- **PyTorch** (v2.0.0+) - 딥러닝 프레임워크
 - **Pydantic** (v2.9.2) - 데이터 검증
 - **WebSockets** (v12.0) - 실시간 통신
+- **Pillow** (v10.0.0+) - 이미지 처리
 
 ## 3. 디렉토리 구조
 
@@ -31,21 +35,28 @@ backend/
 │   ├── __init__.py
 │   ├── docent.py                   # AI 도슨트/채팅 엔드포인트
 │   ├── quest.py                    # 퀘스트 관리 엔드포인트
-│   └── reward.py                   # 보상/포인트 엔드포인트
+│   ├── reward.py                   # 보상/포인트 엔드포인트
+│   └── vlm.py                      # VLM 이미지 분석 엔드포인트
 │
 ├── services/                        # 비즈니스 로직 서비스
 │   ├── __init__.py
 │   ├── ai.py                       # Google Gemini AI 통합
 │   ├── db.py                       # Supabase 데이터베이스 클라이언트
+│   ├── embedding.py                # CLIP 이미지 임베딩
 │   ├── storage.py                  # Supabase Storage (파일 업로드)
-│   └── tts.py                      # Google Cloud Text-to-Speech
+│   ├── tts.py                      # Google Cloud Text-to-Speech
+│   └── vlm.py                      # GPT-4V Vision API 통합
 │
 ├── setup_db_function.py            # 데이터베이스 함수 설정 스크립트
 ├── setup_db_function_psql.py       # 대체 DB 설정 (PostgreSQL)
+├── setup_vlm_schema.sql            # VLM 데이터베이스 스키마 (pgvector)
 ├── seed_database.py                # 데이터베이스 시딩 스크립트
+├── seed_image_vectors.py           # 이미지 임베딩 배치 생성 스크립트
 ├── test_docent.py                  # API 테스트 스크립트
 ├── test_gemini.py                  # Gemini AI 테스트 스크립트
-└── google-tts-credentials.json     # Google Cloud TTS 인증 정보
+├── test_vlm.py                     # VLM API 테스트 스크립트
+├── google-tts-credentials.json     # Google Cloud TTS 인증 정보
+└── VLM_SETUP_GUIDE.md              # VLM 시스템 설정 가이드
 ```
 
 ## 4. 아키텍처 패턴
@@ -117,6 +128,18 @@ GET  /reward/claimed/{user_id}       # 획득한 보상 조회
 POST /reward/use/{reward_id}         # 보상 사용 처리
 ```
 
+### 5.5 VLM 이미지 분석 라우터 (routers/vlm.py)
+**Prefix:** `/vlm`
+
+```
+POST /vlm/analyze                    # AR 카메라 이미지 분석 (base64)
+POST /vlm/analyze-multipart          # 이미지 분석 (multipart/form-data)
+POST /vlm/similar                    # 유사 이미지 검색 (벡터 검색)
+POST /vlm/embed                      # 이미지 임베딩 생성 (관리자용)
+GET  /vlm/places/nearby              # GPS 기반 주변 장소 조회
+GET  /vlm/health                     # VLM 서비스 상태 확인
+```
+
 #### 주요 엔드포인트 상세
 
 **GET /reward/points/{user_id}**
@@ -136,6 +159,22 @@ POST /reward/use/{reward_id}         # 보상 사용 처리
 - 포인트 차감 (음수 값으로 points 테이블에 기록)
 - QR 코드 토큰 생성 (16바이트 URL-safe)
 - user_rewards 테이블에 기록
+
+**POST /vlm/analyze**
+- 요청: `{ user_id: string, image: base64, latitude: float, longitude: float, language: string, enable_tts: boolean }`
+- AR 카메라로 촬영한 이미지를 GPT-4V로 분석
+- GPS 기반 주변 장소 검색 (반경 1km)
+- CLIP 임베딩 생성 및 벡터 유사도 검색
+- Gemini로 최종 설명 보강
+- TTS 오디오 생성 (선택적)
+- 응답: 장소 정보, 설명, 유사 이미지, 신뢰도 점수, 오디오 URL
+- 처리 시간: 평균 5-12초 (VLM API 호출 포함)
+
+**POST /vlm/similar**
+- 요청: `{ image: base64, limit: int, threshold: float }`
+- 이미지와 유사한 장소 사진을 벡터 검색
+- pgvector 코사인 유사도 기반
+- 응답: 유사 이미지 목록 (장소 정보 포함)
 
 ## 6. 데이터베이스 스키마
 
@@ -212,8 +251,59 @@ POST /reward/use/{reward_id}         # 보상 사용 처리
 - created_at (timestamp)
 ```
 
+#### places (장소 - VLM용)
+```sql
+- id (PK, uuid)
+- name (text)               # 장소명 (한글)
+- name_en (text)            # 영문명
+- description (text)         # 장소 설명
+- category (text)           # 카테고리 (관광지, 음식점 등)
+- address (text)            # 주소
+- latitude (decimal)        # 위도
+- longitude (decimal)       # 경도
+- image_url (text)          # 대표 이미지 URL
+- images (text[])           # 추가 이미지 URL 배열
+- metadata (jsonb)          # 추가 메타정보
+- view_count (integer)      # 조회수
+- is_active (boolean)
+- created_at (timestamp)
+```
+
+#### image_vectors (이미지 임베딩 - VLM용)
+```sql
+- id (PK, uuid)
+- place_id (uuid, FK)       # places.id
+- image_url (text)          # 이미지 URL
+- image_hash (text)         # 이미지 해시 (중복 방지)
+- embedding (vector(512))   # CLIP 임베딩 (512차원)
+- source (text)             # 출처 (dataset, user_upload)
+- metadata (jsonb)
+- created_at (timestamp)
+```
+
+#### vlm_logs (VLM 분석 로그)
+```sql
+- id (PK, uuid)
+- user_id (text)
+- image_url (text)          # 업로드된 이미지 URL
+- image_hash (text)         # 이미지 해시 (캐싱용)
+- latitude (decimal)        # 촬영 위치
+- longitude (decimal)
+- vlm_provider (text)       # VLM 제공자 (gpt4v)
+- vlm_response (text)       # VLM 원본 응답
+- final_description (text)   # 최종 설명 (Gemini 보강)
+- matched_place_id (uuid, FK) # 매칭된 장소
+- similar_places (jsonb)    # 유사 장소 목록
+- confidence_score (decimal) # 신뢰도 점수 (0.0-1.0)
+- processing_time_ms (integer) # 처리 시간
+- error_message (text)
+- created_at (timestamp)
+```
+
 ### 6.2 데이터베이스 함수
 - **get_user_points(user_uuid)** - 사용자의 총 포인트 반환 (points.value의 합계)
+- **search_similar_images(query_embedding, match_threshold, match_count)** - 벡터 유사도 검색 (pgvector)
+- **search_places_by_radius(lat, lon, radius_km, limit_count)** - GPS 반경 내 장소 검색
 
 ### 6.3 관계도
 ```
@@ -221,7 +311,15 @@ users (1) ──── (*) user_quests (*) ──── (1) quests
 users (1) ──── (*) points
 users (1) ──── (*) user_rewards (*) ──── (1) rewards
 users (1) ──── (*) chat_logs
+
+places (1) ──── (*) image_vectors
+places (1) ──── (*) vlm_logs
 ```
+
+### 6.4 pgvector 확장
+- **vector(512)** - 512차원 임베딩 벡터 타입
+- **코사인 유사도 검색** - `<=>` 연산자 사용
+- **IVFFlat 인덱스** - 벡터 검색 성능 최적화 (lists=100)
 
 ## 7. 외부 서비스 통합
 
@@ -276,6 +374,38 @@ users (1) ──── (*) chat_logs
 - 임시 파일 자동 정리
 - 캐싱 지원
 
+### 7.5 OpenAI GPT-4V (services/vlm.py)
+- **모델:** gpt-4o (Vision 기능 포함)
+- **용도:** AR 카메라 이미지 분석 및 장소 식별
+
+**주요 함수:**
+- `analyze_image_gpt4v()` - 이미지 분석 (base64 입력)
+- `analyze_place_image()` - 장소 이미지 종합 분석
+- `extract_place_info_from_vlm_response()` - VLM 응답 파싱
+- `calculate_confidence_score()` - 종합 신뢰도 점수 계산
+
+**기능:**
+- 고해상도 이미지 분석 (detail="high")
+- 이미지 자동 압축 (1024x1024 이하)
+- GPS 기반 주변 장소 정보 통합
+- 구조화된 응답 형식 (장소명, 카테고리, 설명, 신뢰도)
+
+### 7.6 CLIP 이미지 임베딩 (services/embedding.py)
+- **모델:** openai/clip-vit-base-patch32
+- **용도:** 이미지를 512차원 벡터로 변환
+
+**주요 함수:**
+- `generate_image_embedding()` - 단일 이미지 임베딩 생성
+- `generate_embeddings_batch()` - 배치 임베딩 생성 (효율적)
+- `calculate_cosine_similarity()` - 벡터 유사도 계산
+- `hash_image()` - 이미지 SHA-256 해시 생성
+
+**기능:**
+- CPU/GPU 자동 선택
+- 배치 처리 지원 (기본 8개)
+- 모델 싱글톤 패턴 (메모리 최적화)
+- L2 정규화된 임베딩
+
 ## 8. 핵심 기능
 
 ### 8.1 AI 도슨트 채팅
@@ -309,14 +439,49 @@ users (1) ──── (*) chat_logs
 1. **Expo Go 모드 (prefer_url=True):** Supabase Storage에 업로드, URL 반환
 2. **독립 실행형 모드 (prefer_url=False):** base64 인코딩 오디오 또는 WebSocket 스트리밍 사용
 
+### 8.6 VLM 이미지 분석 시스템
+- AR 카메라 촬영 이미지 자동 분석
+- GPT-4V를 통한 장소 식별 및 설명 생성
+- CLIP 기반 벡터 유사도 검색
+- GPS + 벡터 + VLM 하이브리드 매칭
+- 신뢰도 점수 계산 (VLM 40% + 벡터 40% + GPS 20%)
+- 이미지 해시 기반 캐싱 (24시간)
+- Gemini를 통한 최종 설명 보강
+- 처리 시간: 평균 5-12초
+
+**처리 흐름:**
+```
+1. 이미지 수신 (base64 or multipart)
+   ↓
+2. 이미지 해시 생성 → 캐싱 체크
+   ↓
+3. GPS 기반 주변 장소 검색 (반경 1km)
+   ↓
+4. CLIP 임베딩 생성 (512차원)
+   ↓
+5. pgvector 유사도 검색 (Top-3)
+   ↓
+6. GPT-4V API 호출 (이미지 분석)
+   ↓
+7. 장소 매칭 (이름 + 벡터 검색)
+   ↓
+8. Gemini로 최종 설명 보강
+   ↓
+9. TTS 생성 (선택적)
+   ↓
+10. vlm_logs 테이블에 저장
+```
+
 ## 9. 환경 설정
 
 ### 환경 변수 (.env)
 ```bash
 SUPABASE_URL                    # Supabase 프로젝트 URL
 SUPABASE_SERVICE_KEY            # Supabase 서비스 역할 키
+OPENAI_API_KEY                  # OpenAI GPT-4V API 키 (이미지 분석 필수)
 GEMINI_API_KEY                  # Google Gemini API 키
 GOOGLE_APPLICATION_CREDENTIALS  # Google Cloud TTS 인증 정보 경로
+PRELOAD_CLIP_MODEL             # CLIP 모델 사전 로드 (true/false, 기본값: false)
 PORT                           # 서버 포트 (기본값: 8000)
 ```
 
@@ -347,23 +512,32 @@ PORT                           # 서버 포트 (기본값: 8000)
 ## 11. 아키텍처 요약
 
 ### 애플리케이션 특성
-- **타입:** 퀘스트 기반 AR 관광 애플리케이션 백엔드
+- **타입:** VLM 이미지 분석 기반 AR 관광 애플리케이션 백엔드
 - **아키텍처 패턴:** 계층형 서비스 지향 아키텍처
 - **API 스타일:** RESTful + WebSocket
-- **데이터베이스:** PostgreSQL (Supabase)
-- **AI 통합:** 대화형 AI용 Google Gemini
+- **데이터베이스:** PostgreSQL (Supabase) + pgvector 확장
+- **AI 통합:** 
+  - GPT-4V (이미지 분석)
+  - Google Gemini (대화형 AI, 텍스트 보강)
+  - CLIP (이미지 임베딩)
 - **오디오 처리:** 스트리밍 지원 Google Cloud TTS
-- **파일 저장소:** 오디오 파일용 Supabase Storage
+- **파일 저장소:** Supabase Storage (오디오, 이미지)
+- **벡터 검색:** pgvector (코사인 유사도)
 - **배포:** 클라우드 준비 완료 (Render.com 호환)
 
 ### 주요 설계 결정사항
 1. 성능을 위한 전체 비동기(async/await) 처리
 2. 유지보수성을 위한 서비스 레이어 분리
-3. Expo Go vs 독립 실행형 앱을 위한 이중 오디오 전송 모드
-4. 대용량 오디오 파일의 더 나은 UX를 위한 WebSocket 스트리밍
-5. Haversine 거리를 사용한 지리공간 쿼리
-6. 포인트 기반 게임화 시스템
-7. 데이터베이스 클라이언트용 싱글톤 패턴
+3. GPT-4V 단독 사용 (이미지 분석 정확도 최적화)
+4. CLIP 기반 벡터 검색 + GPS + VLM 하이브리드 매칭
+5. pgvector를 사용한 고속 벡터 유사도 검색
+6. 이미지 해시 기반 캐싱으로 VLM API 비용 절감
+7. Expo Go vs 독립 실행형 앱을 위한 이중 오디오 전송 모드
+8. 대용량 오디오 파일의 더 나은 UX를 위한 WebSocket 스트리밍
+9. Haversine 거리를 사용한 지리공간 쿼리
+10. 포인트 기반 게임화 시스템
+11. 데이터베이스 클라이언트용 싱글톤 패턴
+12. CLIP 모델 싱글톤으로 메모리 최적화
 
 ## 12. 워크플로우 예시
 
@@ -384,6 +558,31 @@ PORT                           # 서버 포트 (기본값: 8000)
 7. POST /reward/claim - 포인트로 보상 획득
    ↓
 8. POST /reward/use - 보상 사용 (QR 코드)
+```
+
+### AR 카메라 이미지 분석 워크플로우
+```
+1. 사용자가 AR 카메라로 장소 촬영
+   ↓
+2. POST /vlm/analyze - 이미지 + GPS 좌표 전송
+   ↓
+3. 백엔드 처리:
+   - 이미지 해시 생성 및 캐싱 확인
+   - GPS 기반 주변 장소 검색 (1km 반경)
+   - CLIP 임베딩 생성 및 벡터 검색
+   - GPT-4V로 이미지 분석
+   - 장소 매칭 및 신뢰도 계산
+   - Gemini로 최종 설명 보강
+   - TTS 오디오 생성 (선택적)
+   ↓
+4. 클라이언트 응답:
+   - 장소 정보 (이름, 카테고리, 주소)
+   - AI 생성 설명 (3-4문장)
+   - 유사 장소 이미지 (Top-3)
+   - 신뢰도 점수
+   - 오디오 URL (TTS 활성화시)
+   ↓
+5. 사용자가 장소 정보와 설명을 확인하고 오디오 재생
 ```
 
 ### 포인트 관리 워크플로우
@@ -433,9 +632,29 @@ Client Response
 ---
 
 **마지막 업데이트:** 2025년 11월 9일
-**버전:** 1.1
+**버전:** 1.2
 
 ## 변경 이력
+
+### v1.2 (2025-11-09)
+- **VLM 이미지 분석 시스템 추가**
+  - OpenAI GPT-4V Vision API 통합
+  - CLIP 기반 이미지 임베딩 및 벡터 검색
+  - pgvector 확장 및 유사도 검색
+  - `places`, `image_vectors`, `vlm_logs` 테이블 추가
+  - `/vlm` 라우터 및 6개 엔드포인트 추가
+  - GPS + 벡터 + VLM 하이브리드 장소 매칭
+  - 이미지 해시 기반 캐싱 시스템
+  - 신뢰도 점수 계산 알고리즘
+  - AR 카메라 이미지 분석 워크플로우
+- `services/vlm.py` 추가 (GPT-4V 통합)
+- `services/embedding.py` 추가 (CLIP 임베딩)
+- `setup_vlm_schema.sql` 추가 (VLM DB 스키마)
+- `seed_image_vectors.py` 추가 (이미지 임베딩 배치 생성)
+- `test_vlm.py` 추가 (VLM API 테스트)
+- `VLM_SETUP_GUIDE.md` 추가 (VLM 설정 가이드)
+- 기술 스택 업데이트 (OpenAI, Transformers, PyTorch, Pillow)
+- 환경 변수에 `OPENAI_API_KEY`, `PRELOAD_CLIP_MODEL` 추가
 
 ### v1.1 (2025-11-09)
 - `users` 테이블 추가 (사용자 관리)
