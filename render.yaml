@@ -12,11 +12,16 @@ services:
       - key: PORT
         value: 10000
       - key: SUPABASE_URL
-        sync: false  # Set in Render Dashboard
+        sync: false
       - key: SUPABASE_SERVICE_KEY
-        sync: false  # Set in Render Dashboard
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
       - key: GEMINI_API_KEY
-        sync: false  # Set in Render Dashboard
+        sync: false
       - key: GOOGLE_APPLICATION_CREDENTIALS
         value: /etc/secrets/google-tts-credentials.json
-    # Secret Files will be configured in Render Dashboard
+      - key: PRELOAD_CLIP_MODEL
+        value: false
