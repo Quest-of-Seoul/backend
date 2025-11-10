@@ -124,20 +124,27 @@ async def analyze_image(request: VLMAnalyzeRequest):
             )
             print(f"[VLM API] 📍 Found {len(nearby_places)} nearby places")
         
-        # 5. 이미지 임베딩 생성 (병렬 처리 가능)
+        # 5. 이미지 임베딩 생성
         embedding = generate_image_embedding(image_bytes)
         if not embedding:
             print("[VLM API] ⚠️ Embedding generation failed")
         
-        # 6. 벡터 유사도 검색 (Pinecone)
+        # 6. 벡터 유사도 검색 (GPS 필터링 최적화)
         similar_images = []
         best_similarity = 0.0
         if embedding:
-            similar_images = search_similar_pinecone(
+            from services.optimized_search import search_with_gps_filter
+            
+            similar_images = search_with_gps_filter(
                 embedding=embedding,
+                latitude=request.latitude,
+                longitude=request.longitude,
+                radius_km=5.0,  # 5km 반경 내만 검색
                 match_threshold=0.6,
-                match_count=3
+                match_count=3,
+                quest_only=False
             )
+            
             if similar_images:
                 best_similarity = similar_images[0].get("similarity", 0.0)
                 print(f"[VLM API] 🔍 Found {len(similar_images)} similar images (best: {best_similarity:.2f})")

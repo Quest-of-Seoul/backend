@@ -11,7 +11,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import docent, quest, reward, vlm
+from routers import docent, quest, reward, vlm, recommend
 
 app = FastAPI(
     title="Quest of Seoul API",
@@ -33,6 +33,7 @@ app.include_router(docent.router, prefix="/docent", tags=["Docent"])
 app.include_router(quest.router, prefix="/quest", tags=["Quest"])
 app.include_router(reward.router, prefix="/reward", tags=["Reward"])
 app.include_router(vlm.router, prefix="/vlm", tags=["VLM - Image Analysis"])
+app.include_router(recommend.router, prefix="/recommend", tags=["Recommend - Place Recommendation"])
 
 @app.get("/")
 async def root():
