@@ -245,17 +245,17 @@ def get_index_stats() -> Dict:
     Pinecone 인덱스 통계 조회
     
     Returns:
-        통계 정보 딕셔너리
+        통계 정보 딕셔너리 (JSON 직렬화 가능)
     """
     try:
         index = get_pinecone_index()
         stats = index.describe_index_stats()
         
+        # JSON 직렬화 가능한 값만 추출
         result = {
-            "total_vectors": stats.get('total_vector_count', 0),
-            "dimension": stats.get('dimension', 512),
-            "index_fullness": stats.get('index_fullness', 0.0),
-            "namespaces": stats.get('namespaces', {})
+            "total_vectors": int(stats.get('total_vector_count', 0)),
+            "dimension": int(stats.get('dimension', 512)),
+            "index_fullness": float(stats.get('index_fullness', 0.0))
         }
         
         print(f"[Pinecone] 📊 Stats: {result['total_vectors']} vectors, {result['dimension']}D")
@@ -266,8 +266,7 @@ def get_index_stats() -> Dict:
         return {
             "total_vectors": 0,
             "dimension": 512,
-            "index_fullness": 0.0,
-            "namespaces": {}
+            "index_fullness": 0.0
         }
 
 

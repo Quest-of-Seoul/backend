@@ -12,14 +12,17 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ### 환경 변수 (.env)
 
 ```bash
-# Supabase
+# Supabase (메타데이터 저장)
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=your-service-key
 
-# OpenAI GPT-4V (필수)
+# Pinecone (벡터 검색)
+PINECONE_API_KEY=your-pinecone-api-key
+
+# OpenAI GPT-4V (이미지 분석)
 OPENAI_API_KEY=sk-...
 
-# Google Gemini (설명 보강용)
+# Google Gemini (설명 보강)
 GEMINI_API_KEY=your-gemini-api-key
 
 # Google Cloud TTS
@@ -33,14 +36,23 @@ PRELOAD_CLIP_MODEL=false
 
 ## 데이터베이스 설정
 
-### 1. SQL 스키마 실행
+### 1. Supabase 테이블 생성
 
 Supabase Dashboard → SQL Editor에서 `sql/setup_vlm_schema.sql` 실행
+- places 테이블 (장소 정보)
+- vlm_logs 테이블 (분석 로그)
+- GPS 검색 함수
 
-### 2. 이미지 임베딩 생성
+### 2. Pinecone 인덱스 생성
 
 ```bash
-# 모든 장소의 이미지 임베딩 생성
+python setup_pinecone.py
+```
+
+### 3. 이미지 임베딩 생성
+
+```bash
+# 모든 장소의 이미지를 CLIP 임베딩 → Pinecone 저장
 python seed_image_vectors.py --all
 
 # 상태 확인
@@ -114,7 +126,12 @@ GET /vlm/places/nearby?latitude=37.5665&longitude=126.9780&radius_km=1.0
   "status": "healthy",
   "services": {
     "gpt4v": true,
-    "clip": true
+    "clip": true,
+    "pinecone": true
+  },
+  "pinecone_stats": {
+    "total_vectors": 5,
+    "dimension": 512
   }
 }
 ```
