@@ -1,10 +1,11 @@
 """
 이미지 임베딩 배치 생성 스크립트
-Supabase DB의 places 테이블에서 이미지를 가져와 임베딩 생성 후 image_vectors 테이블에 저장
+Supabase DB의 places 테이블에서 이미지를 가져와 임베딩 생성 후 Pinecone에 저장
 """
 
 import os
 import sys
+import uuid
 from dotenv import load_dotenv
 import requests
 from io import BytesIO
@@ -14,7 +15,8 @@ from typing import List, Dict
 load_dotenv()
 
 # 서비스 import
-from services.db import get_db, save_image_vector
+from services.db import get_db
+from services.pinecone_store import upsert_pinecone
 from services.embedding import generate_image_embedding, hash_image
 
 
@@ -78,24 +80,26 @@ def process_place_images(place: Dict, batch_mode: bool = False):
     
     print(f"✅ Embedding generated: {len(embedding)} dimensions")
     
-    # DB 저장
-    print(f"💾 Saving to database...")
-    vector_id = save_image_vector(
-        place_id=place_id,
-        image_url=image_url,
+    # Pinecone에 저장
+    print(f"💾 Saving to Pinecone...")
+    vector_id = str(uuid.uuid4())
+    success = upsert_pinecone(
+        vector_id=vector_id,
         embedding=embedding,
-        image_hash=img_hash,
-        source="dataset",
         metadata={
+            "place_id": place_id,
+            "image_url": image_url,
+            "image_hash": img_hash,
             "place_name": place_name,
-            "category": place.get("category")
+            "category": place.get("category"),
+            "source": "dataset"
         }
     )
     
-    if vector_id:
-        print(f"✅ Saved with ID: {vector_id}")
+    if success:
+        print(f"✅ Saved to Pinecone: {vector_id}")
     else:
-        print(f"❌ Failed to save to database")
+        print(f"❌ Failed to save to Pinecone")
 
 
 def seed_all_places():
@@ -174,35 +178,34 @@ def seed_specific_place(place_name: str):
 
 def check_embedding_status():
     """
-    임베딩 생성 상태 확인
+    임베딩 생성 상태 확인 (Pinecone)
     """
     try:
+        from services.pinecone_store import get_index_stats
+        
         db = get_db()
         
-        # 전체 장소 수
+        # 전체 장소 수 (Supabase)
         places_result = db.table("places").select("id", count="exact").execute()
         total_places = places_result.count
         
-        # 임베딩이 있는 장소 수
-        vectors_result = db.table("image_vectors").select("place_id", count="exact").execute()
-        total_vectors = vectors_result.count
-        
-        # 고유한 place_id 수 (중복 제거)
-        unique_places_result = db.table("image_vectors").select("place_id").execute()
-        unique_place_ids = set([v.get("place_id") for v in unique_places_result.data])
-        places_with_embeddings = len(unique_place_ids)
+        # Pinecone 통계
+        pinecone_stats = get_index_stats()
+        total_vectors = pinecone_stats.get("total_vectors", 0)
         
         print("=" * 60)
-        print("📊 Embedding Status Report")
+        print("📊 Embedding Status Report (Pinecone)")
         print("=" * 60)
-        print(f"Total places: {total_places}")
-        print(f"Places with embeddings: {places_with_embeddings}")
-        print(f"Total embeddings: {total_vectors}")
-        print(f"Coverage: {places_with_embeddings}/{total_places} ({places_with_embeddings/total_places*100:.1f}%)")
+        print(f"Total places (Supabase): {total_places}")
+        print(f"Total vectors (Pinecone): {total_vectors}")
+        print(f"Dimension: {pinecone_stats.get('dimension', 512)}")
+        print(f"Index fullness: {pinecone_stats.get('index_fullness', 0):.2%}")
         print("=" * 60)
     
     except Exception as e:
         print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

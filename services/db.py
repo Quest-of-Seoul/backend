@@ -30,62 +30,9 @@ def get_db() -> Client:
 
 
 # ============================================================
-# VLM & 장소 검색 함수들
+# 장소 검색 함수들
+# 벡터 검색은 services/pinecone_store.py 사용
 # ============================================================
-
-def search_similar_images(
-    embedding: List[float],
-    match_threshold: float = 0.7,
-    match_count: int = 5
-) -> List[Dict]:
-    """
-    벡터 유사도 기반 이미지 검색 (pgvector)
-    
-    Args:
-        embedding: 쿼리 이미지 임베딩 벡터 (512차원)
-        match_threshold: 최소 유사도 임계값
-        match_count: 반환할 최대 결과 수
-    
-    Returns:
-        유사 이미지 리스트 (장소 정보 포함)
-    """
-    try:
-        db = get_db()
-        
-        # pgvector 함수 호출
-        result = db.rpc(
-            "search_similar_images",
-            {
-                "query_embedding": embedding,
-                "match_threshold": match_threshold,
-                "match_count": match_count
-            }
-        ).execute()
-        
-        if not result.data:
-            print("[DB] No similar images found")
-            return []
-        
-        # 장소 정보 조인
-        similar_images = []
-        for item in result.data:
-            place_id = item.get("place_id")
-            if place_id:
-                place = get_place_by_id(place_id)
-                similar_images.append({
-                    "id": item.get("id"),
-                    "image_url": item.get("image_url"),
-                    "similarity": item.get("similarity"),
-                    "place": place
-                })
-        
-        print(f"[DB] ✅ Found {len(similar_images)} similar images")
-        return similar_images
-    
-    except Exception as e:
-        print(f"[DB] ❌ Error searching similar images: {e}")
-        return []
-
 
 def search_places_by_radius(
     latitude: float,
@@ -188,57 +135,9 @@ def get_place_by_name(name: str, fuzzy: bool = True) -> Optional[Dict]:
         return None
 
 
-def save_image_vector(
-    place_id: str,
-    image_url: str,
-    embedding: List[float],
-    image_hash: Optional[str] = None,
-    source: str = "dataset",
-    metadata: Optional[Dict] = None
-) -> Optional[str]:
-    """
-    이미지 벡터를 DB에 저장
-    
-    Args:
-        place_id: 장소 UUID
-        image_url: 이미지 URL
-        embedding: 512차원 임베딩 벡터
-        image_hash: 이미지 해시
-        source: 출처
-        metadata: 추가 메타데이터
-    
-    Returns:
-        생성된 벡터 ID
-    """
-    try:
-        db = get_db()
-        
-        data = {
-            "place_id": place_id,
-            "image_url": image_url,
-            "embedding": embedding,
-            "source": source
-        }
-        
-        if image_hash:
-            data["image_hash"] = image_hash
-        
-        if metadata:
-            data["metadata"] = metadata
-        
-        result = db.table("image_vectors").insert(data).execute()
-        
-        if result.data and len(result.data) > 0:
-            vector_id = result.data[0].get("id")
-            print(f"[DB] ✅ Image vector saved: {vector_id}")
-            return vector_id
-        
-        return None
-    
-    except Exception as e:
-        print(f"[DB] ❌ Error saving image vector: {e}")
-        return None
-
+# ============================================================
+# VLM 로그 함수들
+# ============================================================
 
 def save_vlm_log(
     user_id: str,

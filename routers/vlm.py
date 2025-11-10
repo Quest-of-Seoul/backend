@@ -21,16 +21,21 @@ from services.embedding import (
     hash_image
 )
 from services.db import (
-    search_similar_images,
     search_places_by_radius,
     get_place_by_name,
     save_vlm_log,
     get_cached_vlm_result,
     increment_place_view_count
 )
+# Pinecone vector store (벡터 검색)
+from services.pinecone_store import (
+    search_similar_pinecone,
+    upsert_pinecone
+)
 from services.ai import generate_docent_message
 from services.tts import text_to_speech_url, text_to_speech
-from services.storage import upload_audio_to_storage
+from services.storage import upload_audio_to_storage, compress_and_upload_image
+import os
 
 router = APIRouter()
 
@@ -124,11 +129,11 @@ async def analyze_image(request: VLMAnalyzeRequest):
         if not embedding:
             print("[VLM API] ⚠️ Embedding generation failed")
         
-        # 6. 벡터 유사도 검색
+        # 6. 벡터 유사도 검색 (Pinecone)
         similar_images = []
         best_similarity = 0.0
         if embedding:
-            similar_images = search_similar_images(
+            similar_images = search_similar_pinecone(
                 embedding=embedding,
                 match_threshold=0.6,
                 match_count=3
@@ -246,11 +251,18 @@ VLM 분석 결과:
         processing_time_ms = int((time.time() - start_time) * 1000)
         print(f"[VLM API] ⏱️ Processing time: {processing_time_ms}ms")
         
-        # 15. 로그 저장
+        # 15. 로그 저장 (이미지를 Storage에 업로드)
         try:
+            # 이미지를 Supabase Storage에 업로드
+            uploaded_image_url = compress_and_upload_image(
+                image_bytes=image_bytes,
+                max_size=1920,
+                quality=85
+            )
+            
             save_vlm_log(
                 user_id=request.user_id,
-                image_url=None,  # Storage 업로드 구현시 URL 저장
+                image_url=uploaded_image_url,  # ✅ Storage URL
                 latitude=request.latitude,
                 longitude=request.longitude,
                 vlm_provider="gpt4v",
@@ -352,8 +364,8 @@ async def search_similar(request: SimilarImageRequest):
         if not embedding:
             raise HTTPException(status_code=503, detail="Embedding service unavailable")
         
-        # 유사도 검색
-        similar_images = search_similar_images(
+        # 유사도 검색 (Pinecone)
+        similar_images = search_similar_pinecone(
             embedding=embedding,
             match_threshold=request.threshold,
             match_count=request.limit
@@ -380,11 +392,10 @@ async def create_embedding(
     """
     이미지 임베딩 생성 및 저장 (관리자용)
     
-    장소 이미지를 업로드하고 벡터 DB에 저장
+    장소 이미지를 업로드하고 Pinecone에 저장
     """
     try:
-        from services.db import save_image_vector
-        from services.storage import upload_audio_to_storage
+        import uuid
         
         print(f"[VLM API] 📤 Creating embedding for place: {place_id}")
         
@@ -394,39 +405,54 @@ async def create_embedding(
         # 이미지 해시
         img_hash = hash_image(image_bytes)
         
-        # Storage 업로드 (이미지)
-        # TODO: Supabase Storage에 이미지 업로드 구현
-        image_url = f"https://placeholder.com/{img_hash}.jpg"
+        # Supabase Storage에 이미지 업로드
+        image_url = compress_and_upload_image(
+            image_bytes=image_bytes,
+            max_size=1920,
+            quality=85
+        )
+        
+        if not image_url:
+            raise HTTPException(status_code=500, detail="Image upload failed")
+        
+        print(f"[VLM API] ✅ Image uploaded: {image_url}")
         
         # 임베딩 생성
         embedding = generate_image_embedding(image_bytes)
         if not embedding:
             raise HTTPException(status_code=503, detail="Embedding generation failed")
         
-        # DB 저장
-        vector_id = save_image_vector(
-            place_id=place_id,
-            image_url=image_url,
+        # Pinecone에 저장
+        vector_id = str(uuid.uuid4())
+        success = upsert_pinecone(
+            vector_id=vector_id,
             embedding=embedding,
-            image_hash=img_hash,
-            source="admin_upload",
-            metadata={"filename": image.filename}
+            metadata={
+                "place_id": place_id,
+                "image_url": image_url,
+                "image_hash": img_hash,
+                "source": "admin_upload",
+                "filename": image.filename
+            }
         )
         
-        if not vector_id:
+        if not success:
             raise HTTPException(status_code=500, detail="Failed to save embedding")
         
-        print(f"[VLM API] ✅ Embedding saved: {vector_id}")
+        print(f"[VLM API] ✅ Embedding saved to Pinecone: {vector_id}")
         
         return {
             "success": True,
             "vector_id": vector_id,
             "place_id": place_id,
+            "image_url": image_url,
             "embedding_dimension": len(embedding)
         }
     
     except Exception as e:
         print(f"[VLM API] ❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Embedding creation failed: {str(e)}")
 
 
@@ -466,10 +492,22 @@ async def health_check():
     from services.vlm import OPENAI_AVAILABLE
     from services.embedding import CLIP_AVAILABLE
     
+    # Pinecone 연결 테스트
+    pinecone_available = False
+    pinecone_stats = {}
+    try:
+        from services.pinecone_store import get_index_stats
+        pinecone_stats = get_index_stats()
+        pinecone_available = True
+    except:
+        pass
+    
     return {
         "status": "healthy",
         "services": {
             "gpt4v": OPENAI_AVAILABLE,
-            "clip": CLIP_AVAILABLE
-        }
+            "clip": CLIP_AVAILABLE,
+            "pinecone": pinecone_available
+        },
+        "pinecone_stats": pinecone_stats if pinecone_available else None
     }

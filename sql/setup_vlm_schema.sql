@@ -1,13 +1,12 @@
 -- Quest of Seoul - VLM Image Analysis Schema
 -- AR 카메라 기반 이미지 분석 및 장소 추천 시스템
+-- 벡터 검색: Pinecone / 메타데이터: Supabase
 
 -- 실행 방법:
 -- 1. Supabase Dashboard → SQL Editor
 -- 2. 이 파일 내용 복사 & 붙여넣기 → Run
--- 3. pgvector 확장이 설치되고 테이블이 생성됩니다.
 
--- pgvector 확장 설치 (이미지 임베딩 벡터 검색용)
-CREATE EXTENSION IF NOT EXISTS vector;
+-- 지리 공간 확장 설치 (GPS 기반 검색용)
 CREATE EXTENSION IF NOT EXISTS cube;
 CREATE EXTENSION IF NOT EXISTS earthdistance;
 
@@ -42,30 +41,6 @@ CREATE INDEX IF NOT EXISTS idx_places_category ON places(category);
 CREATE INDEX IF NOT EXISTS idx_places_name ON places(name);
 CREATE INDEX IF NOT EXISTS idx_places_name_en ON places(name_en);
 
--- image_vectors 테이블 (이미지 임베딩 저장)
-CREATE TABLE IF NOT EXISTS image_vectors (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    place_id UUID REFERENCES places(id) ON DELETE CASCADE,
-    image_url TEXT NOT NULL,                   -- 이미지 URL (Supabase Storage)
-    image_hash TEXT,                           -- 이미지 해시 (중복 방지용)
-    embedding VECTOR(512),                     -- CLIP 임베딩 (512차원)
-    source TEXT DEFAULT 'dataset',             -- 출처 (dataset, user_upload, api)
-    metadata JSONB DEFAULT '{}'::jsonb,        -- 추가 정보 (원본 크기, 촬영 날짜 등)
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- 벡터 유사도 검색 인덱스 (IVFFlat - 코사인 유사도)
--- lists 값은 데이터 행수에 따라 조정 (권장: sqrt(행수))
-CREATE INDEX IF NOT EXISTS idx_image_vectors_embedding 
-ON image_vectors USING ivfflat (embedding vector_cosine_ops) 
-WITH (lists = 100);
-
--- place_id 검색 인덱스
-CREATE INDEX IF NOT EXISTS idx_image_vectors_place_id ON image_vectors(place_id);
-
--- 이미지 해시 중복 방지 인덱스
-CREATE INDEX IF NOT EXISTS idx_image_vectors_hash ON image_vectors(image_hash);
-
 -- vlm_logs 테이블 (VLM 분석 로그)
 CREATE TABLE IF NOT EXISTS vlm_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -98,35 +73,7 @@ CREATE INDEX IF NOT EXISTS idx_vlm_logs_image_hash ON vlm_logs(image_hash);
 -- 날짜별 조회 인덱스
 CREATE INDEX IF NOT EXISTS idx_vlm_logs_created_at ON vlm_logs(created_at DESC);
 
--- 유틸리티 함수: 벡터 유사도 검색
-CREATE OR REPLACE FUNCTION search_similar_images(
-    query_embedding VECTOR(512),
-    match_threshold FLOAT DEFAULT 0.7,
-    match_count INT DEFAULT 5
-)
-RETURNS TABLE (
-    id UUID,
-    place_id UUID,
-    image_url TEXT,
-    similarity FLOAT
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    RETURN QUERY
-    SELECT
-        iv.id,
-        iv.place_id,
-        iv.image_url,
-        1 - (iv.embedding <=> query_embedding) AS similarity
-    FROM image_vectors iv
-    WHERE 1 - (iv.embedding <=> query_embedding) > match_threshold
-    ORDER BY iv.embedding <=> query_embedding
-    LIMIT match_count;
-END;
-$$;
-
--- 유틸리티 함수: 반경 내 장소 검색
+-- 유틸리티 함수: 반경 내 장소 검색 (GPS 기반)
 CREATE OR REPLACE FUNCTION search_places_by_radius(
     lat DECIMAL,
     lon DECIMAL,
@@ -228,11 +175,9 @@ VALUES
     )
 ON CONFLICT DO NOTHING;
 
--- 테이블 코멘트 추가
+-- 테이블 코멘트
 COMMENT ON TABLE places IS 'AR 카메라로 촬영 가능한 서울 주요 장소 정보';
-COMMENT ON TABLE image_vectors IS '장소별 이미지 임베딩 벡터 (CLIP 512차원)';
 COMMENT ON TABLE vlm_logs IS 'VLM 이미지 분석 요청 및 응답 로그';
 
 COMMENT ON COLUMN places.metadata IS '운영시간, 입장료, 태그 등 추가 JSON 정보';
-COMMENT ON COLUMN image_vectors.embedding IS 'CLIP 모델로 생성한 512차원 벡터';
 COMMENT ON COLUMN vlm_logs.confidence_score IS '장소 매칭 신뢰도 (0.0=낮음, 1.0=높음)';
