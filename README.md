@@ -7,6 +7,7 @@ FastAPI 기반 AI 서비스 백엔드
 AI 기능 전담 마이크로서비스
 - VLM 이미지 분석 (GPT-4V)
 - AI 도슨트 (Gemini)
+- AI 장소 추천 시스템 (CLIP + Pinecone)
 - TTS (Google Cloud)
 - 벡터 검색 (Pinecone)
 
@@ -29,13 +30,17 @@ backend/
 │   └── pinecone_schema.py
 ├── routers/
 │   ├── vlm.py
-│   └── docent.py
+│   ├── docent.py
+│   └── recommend.py
 ├── services/
 │   ├── ai.py
 │   ├── vlm.py
 │   ├── embedding.py
 │   ├── pinecone_store.py
+│   ├── recommendation.py
 │   └── tts.py
+├── scripts/
+│   └── test_api.py
 ├── main.py
 └── requirements.txt
 ```

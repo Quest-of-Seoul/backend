@@ -1,6 +1,6 @@
 """
 Quest of Seoul - AI Service Backend
-FastAPI backend for AI features (VLM, Docent, TTS)
+FastAPI backend for AI features
 """
 
 from dotenv import load_dotenv
@@ -23,19 +23,18 @@ logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import docent, vlm
+from routers import docent, vlm, recommend
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Quest of Seoul AI Service starting up...")
-    logger.info("Available endpoints: /docs, /redoc")
     yield
     logger.info("Quest of Seoul AI Service shutting down...")
 
 app = FastAPI(
     title="Quest of Seoul AI Service",
-    description="AI Service API for VLM Image Analysis, AI Docent, and TTS",
+    description="AI Service API",
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -48,6 +47,10 @@ app = FastAPI(
         {
             "name": "AI Docent",
             "description": "AI-powered conversational tour guide"
+        },
+        {
+            "name": "Recommendation",
+            "description": "AI-based place recommendation system"
         }
     ]
 )
@@ -64,6 +67,7 @@ app.add_middleware(
 # Include AI routers only
 app.include_router(vlm.router, prefix="/vlm", tags=["VLM"])
 app.include_router(docent.router, prefix="/docent", tags=["AI Docent"])
+app.include_router(recommend.router, prefix="/recommend", tags=["Recommendation"])
 
 
 @app.get("/")
@@ -75,7 +79,8 @@ async def root():
         "services": [
             "VLM Image Analysis",
             "AI Docent",
-            "TTS"
+            "TTS",
+            "Place Recommendation"
         ]
     }
 
@@ -86,7 +91,8 @@ async def health_check():
         "services": {
             "vlm": "active",
             "docent": "active",
-            "tts": "active"
+            "tts": "active",
+            "recommendation": "active"
         }
     }
 

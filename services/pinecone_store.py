@@ -192,20 +192,21 @@ def fetch_vector_by_id(vector_id: str) -> Optional[Dict]:
         index = get_pinecone_index()
         result = index.fetch(ids=[vector_id], namespace="")
         
-        if not result or not result.get('vectors'):
+        # Pinecone FetchResponse uses attributes, not dict methods
+        vectors = getattr(result, 'vectors', None)
+        
+        if not vectors or vector_id not in vectors:
             logger.warning(f"Vector not found: {vector_id}")
             return None
         
-        vector_data = result['vectors'].get(vector_id)
-        if vector_data:
-            return {
-                "id": vector_id,
-                "values": vector_data.get('values'),
-                "metadata": vector_data.get('metadata', {})
-            }
+        vector_data = vectors[vector_id]
+        logger.info(f"Vector fetched successfully: {vector_id}")
         
-        logger.warning(f"Vector not found: {vector_id}")
-        return None
+        return {
+            "id": vector_id,
+            "values": getattr(vector_data, 'values', []),
+            "metadata": getattr(vector_data, 'metadata', {})
+        }
     
     except Exception as e:
         logger.error(f"Fetch error: {e}", exc_info=True)

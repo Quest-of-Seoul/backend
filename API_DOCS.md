@@ -198,6 +198,187 @@ VLM 서비스 상태 확인
 
 ---
 
+### Recommendation - AI Place Recommendation
+
+#### POST /recommend/recommend
+
+AI 기반 장소 추천 (이미지 + 카테고리)
+
+**Request Body:**
+
+```json
+{
+  "image": "base64_encoded_image",
+  "category": "역사유적",
+  "place_id": "place-001",
+  "gps": {
+    "latitude": 37.5796,
+    "longitude": 126.9770
+  },
+  "top_k": 5,
+  "threshold": 0.7,
+  "context": "search"
+}
+```
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| image | string | ✅ | Base64 인코딩된 이미지 |
+| category | string | ✅ | 카테고리 필터 (역사유적, 관광지 등) |
+| place_id | string | ⚪ | 제외할 장소 ID (상세페이지용) |
+| gps | object | ⚪ | GPS 위치 정보 |
+| top_k | integer | ⚪ | 추천 개수 (1-10, 기본: 5) |
+| threshold | float | ⚪ | 최소 신뢰도 (0.0-1.0, 기본: 0.7) |
+| context | string | ⚪ | 진입 경로 (chat/search/detail/banner) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "recommendations": [
+    {
+      "place_id": "place-001",
+      "name": "경복궁",
+      "name_en": "Gyeongbokgung Palace",
+      "category": "역사유적",
+      "image_similarity": 0.92,
+      "category_match": 1.0,
+      "final_score": 0.92,
+      "location": {
+        "latitude": 37.5796,
+        "longitude": 126.9770
+      },
+      "image_url": "https://...",
+      "distance_km": 2.5
+    }
+  ],
+  "count": 3,
+  "threshold": 0.7,
+  "context": "search",
+  "processing_time_ms": 850
+}
+```
+
+**Status Codes:**
+
+- 200: 성공
+- 400: 잘못된 요청 (이미지 형식 오류 등)
+- 500: 서버 오류
+
+---
+
+#### POST /recommend/similar
+
+장소 ID 기반 유사 장소 추천 (장소 상세 페이지용)
+
+**Request Body:**
+
+```json
+{
+  "place_id": "place-001-gyeongbokgung",
+  "top_k": 3,
+  "threshold": 0.7
+}
+```
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| place_id | string | ✅ | 장소 ID |
+| top_k | integer | ⚪ | 추천 개수 (1-10, 기본: 3) |
+| threshold | float | ⚪ | 최소 유사도 (0.0-1.0, 기본: 0.7) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "source_place": {
+    "place_id": "place-001-gyeongbokgung",
+    "name": "경복궁",
+    "category": "역사유적"
+  },
+  "recommendations": [
+    {
+      "place_id": "place-005-bukchon-hanok",
+      "name": "북촌한옥마을",
+      "name_en": "Bukchon Hanok Village",
+      "category": "역사유적",
+      "similarity": 0.89,
+      "location": {
+        "latitude": 37.5823,
+        "longitude": 126.9853
+      },
+      "image_url": "https://..."
+    }
+  ],
+  "count": 3,
+  "processing_time_ms": 320
+}
+```
+
+**Status Codes:**
+
+- 200: 성공
+- 404: 장소를 찾을 수 없음
+- 500: 서버 오류
+
+---
+
+#### GET /recommend/categories
+
+사용 가능한 카테고리 목록 조회
+
+**Response:**
+
+```json
+{
+  "categories": [
+    {
+      "id": "역사유적",
+      "name": "역사유적",
+      "name_en": "Historical Sites",
+      "similar_to": ["문화재", "궁궐", "유적지"]
+    },
+    {
+      "id": "관광지",
+      "name": "관광지",
+      "name_en": "Tourist Attractions",
+      "similar_to": ["명소", "전망대"]
+    }
+  ],
+  "count": 5
+}
+```
+
+---
+
+#### GET /recommend/health
+
+추천 서비스 상태 확인
+
+**Response:**
+
+```json
+{
+  "status": "healthy",
+  "services": {
+    "clip_embedding": true,
+    "pinecone": true
+  },
+  "pinecone_stats": {
+    "total_vectors": 150,
+    "dimension": 512
+  }
+}
+```
+
+---
+
 ### Docent - AI Tour Guide
 
 #### POST /docent/chat
