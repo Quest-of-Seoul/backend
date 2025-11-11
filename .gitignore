@@ -15,7 +15,6 @@ sunlit-runway-477205-q0-bd15b92d2cf3.json
 # Logs
 logs
 *.log
-app.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
