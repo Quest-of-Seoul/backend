@@ -319,11 +319,11 @@ DELIMITER ;
 -- Places 샘플 데이터
 INSERT INTO places (id, name, name_en, description, category, address, latitude, longitude, image_url, metadata)
 VALUES
-    (UUID(), '경복궁', 'Gyeongbokgung Palace', '조선시대 대표 궁궐로, 1395년에 창건되었습니다. 근정전, 경회루 등 아름다운 전통 건축물을 감상할 수 있습니다.', '역사유적', '서울특별시 종로구 사직로 161', 37.579617, 126.977041, 'https://ak-d.tripcdn.com/images/0104p120008ars39uB986_W_1440_810_Q80.webp?proc=source%2ftrip&proc=source%2ftrip', JSON_OBJECT('opening_hours', '09:00-18:00', 'closed', '화요일', 'admission_fee', '3000원')),
-    (UUID(), '남산서울타워', 'N Seoul Tower', '서울의 랜드마크로 해발 479.7m에 위치한 전망대입니다. 서울 시내 전경을 한눈에 볼 수 있습니다.', '관광지', '서울특별시 용산구 남산공원길 105', 37.551169, 126.988227, 'https://ak-d.tripcdn.com/images/1lo5r12000jt8ej8cD340_W_1440_810_Q80.webp?proc=source%2ftrip&proc=source%2ftrip', JSON_OBJECT('opening_hours', '10:00-23:00', 'admission_fee', '16000원')),
-    (UUID(), '광화문광장', 'Gwanghwamun Square', '세종대왕과 이순신 장군 동상이 있는 서울의 대표 광장입니다.', '광장', '서울특별시 종로구 세종대로 172', 37.572889, 126.976849, 'https://ak-d.tripcdn.com/images/01051120008c32dlbE44A_W_1440_810_Q80.webp?proc=source%2ftrip&proc=source%2ftrip', JSON_OBJECT('opening_hours', '24시간', 'admission_fee', '무료')),
-    (UUID(), '명동성당', 'Myeongdong Cathedral', '1898년에 완공된 한국 최초의 고딕 양식 성당입니다.', '종교시설', '서울특별시 중구 명동길 74', 37.563600, 126.986870, 'https://ak-d.tripcdn.com/images/100f1f000001gqchv1B53_W_1440_810_Q80.webp?proc=source%2ftrip&proc=source%2ftrip', JSON_OBJECT('opening_hours', '09:00-21:00', 'admission_fee', '무료')),
-    (UUID(), '북촌한옥마을', 'Bukchon Hanok Village', '전통 한옥이 밀집한 역사적 주거지역으로 조선시대 양반들의 집이 보존되어 있습니다.', '문화마을', '서울특별시 종로구 계동길 37', 37.582306, 126.985302, 'https://ak-d.tripcdn.com/images/100p11000000r4rhv9EF4_C_1200_800_Q70.jpg?proc=source%2ftrip', JSON_OBJECT('opening_hours', '24시간', 'admission_fee', '무료'))
+    (UUID(), '경복궁', 'Gyeongbokgung Palace', '조선시대 대표 궁궐로, 1395년에 창건되었습니다. 근정전, 경회루 등 아름다운 전통 건축물을 감상할 수 있습니다.', '역사유적', '서울특별시 종로구 사직로 161', 37.579617, 126.977041, 'https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp', JSON_OBJECT('opening_hours', '09:00-18:00', 'closed', '화요일', 'admission_fee', '3000원')),
+    (UUID(), '남산서울타워', 'N Seoul Tower', '서울의 랜드마크로 해발 479.7m에 위치한 전망대입니다. 서울 시내 전경을 한눈에 볼 수 있습니다.', '관광지', '서울특별시 용산구 남산공원길 105', 37.551169, 126.988227, 'https://ak-d.tripcdn.com/images/100v0z000000nkadwE2AA_C_1200_800_Q70.webp', JSON_OBJECT('opening_hours', '10:00-23:00', 'admission_fee', '16000원')),
+    (UUID(), '광화문광장', 'Gwanghwamun Square', '세종대왕과 이순신 장군 동상이 있는 서울의 대표 광장입니다.', '광장', '서울특별시 종로구 세종대로 172', 37.572889, 126.976849, 'https://ak-d.tripcdn.com/images/01051120008c32dlbE44A.webp', JSON_OBJECT('opening_hours', '24시간', 'admission_fee', '무료')),
+    (UUID(), '명동성당', 'Myeongdong Cathedral', '1898년에 완공된 한국 최초의 고딕 양식 성당입니다.', '종교시설', '서울특별시 중구 명동길 74', 37.563600, 126.986870, 'https://ak-d.tripcdn.com/images/100f1f000001gqchv1B53.webp', JSON_OBJECT('opening_hours', '09:00-21:00', 'admission_fee', '무료')),
+    (UUID(), '북촌한옥마을', 'Bukchon Hanok Village', '전통 한옥이 밀집한 역사적 주거지역으로 조선시대 양반들의 집이 보존되어 있습니다.', '문화마을', '서울특별시 종로구 계동길 37', 37.582306, 126.985302, 'https://ak-d.tripcdn.com/images/100p11000000r4rhv9EF4.jpg', JSON_OBJECT('opening_hours', '24시간', 'admission_fee', '무료'))
 ON DUPLICATE KEY UPDATE id=id;
 
 -- Quests 샘플 데이터
