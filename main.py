@@ -6,6 +6,7 @@ FastAPI backend for AI features (VLM, Docent, TTS)
 from dotenv import load_dotenv
 import os
 import logging
+from contextlib import asynccontextmanager
 
 # Load environment variables FIRST (before importing routers)
 load_dotenv()
@@ -25,12 +26,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import docent, vlm
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Quest of Seoul AI Service starting up...")
+    logger.info("Available endpoints: /docs, /redoc")
+    yield
+    logger.info("Quest of Seoul AI Service shutting down...")
+
 app = FastAPI(
     title="Quest of Seoul AI Service",
     description="AI Service API for VLM Image Analysis, AI Docent, and TTS",
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
     openapi_tags=[
         {
             "name": "VLM",
@@ -56,14 +66,6 @@ app.add_middleware(
 app.include_router(vlm.router, prefix="/vlm", tags=["VLM"])
 app.include_router(docent.router, prefix="/docent", tags=["AI Docent"])
 
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Quest of Seoul AI Service starting up...")
-    logger.info("Available endpoints: /docs, /redoc")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Quest of Seoul AI Service shutting down...")
 
 @app.get("/")
 async def root():
