@@ -59,8 +59,8 @@ CREATE TABLE IF NOT EXISTS quests (
     title VARCHAR(255),
     description TEXT,
     category VARCHAR(50),
-    lat DOUBLE PRECISION NOT NULL,
-    lon DOUBLE PRECISION NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
     reward_point INTEGER DEFAULT 100,
     points INTEGER DEFAULT 10,
     difficulty VARCHAR(20) DEFAULT 'easy',
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS quests (
 CREATE INDEX idx_quests_place_id ON quests(place_id);
 CREATE INDEX idx_quests_category ON quests(category);
 CREATE INDEX idx_quests_is_active ON quests(is_active);
-CREATE INDEX idx_quests_location ON quests(lat, lon);
+CREATE INDEX idx_quests_location ON quests(latitude, longitude);
 
 -- Quest Quizzes Table
 CREATE TABLE IF NOT EXISTS quest_quizzes (
@@ -394,7 +394,7 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- Sample Quests
-INSERT INTO quests (name, description, lat, lon, reward_point)
+INSERT INTO quests (name, description, latitude, longitude, reward_point)
 VALUES
     ('경복궁 (Gyeongbokgung Palace)', '조선왕조의 법궁으로, 서울의 대표적인 역사 유적지입니다.', 37.5796, 126.9770, 100),
     ('남산타워 (N Seoul Tower)', '서울의 상징적인 랜드마크로, 도시 전경을 한눈에 볼 수 있습니다.', 37.5512, 126.9882, 150),

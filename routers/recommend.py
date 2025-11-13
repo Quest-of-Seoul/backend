@@ -134,15 +134,29 @@ async def get_quest_detail(quest_id: str):
         quest = quest_result.data
         
         place = db.table("places").select("*").eq("id", quest["place_id"]).single().execute()
-        quizzes = db.table("quest_quizzes").select("*").eq("quest_id", quest_id).execute()
+        quizzes_result = db.table("quest_quizzes").select("*").eq("quest_id", quest_id).execute()
         
-        logger.info(f"Retrieved quest detail: {quest_id}")
+        # Format quizzes to match frontend expectations
+        quizzes = []
+        for quiz in quizzes_result.data:
+            quiz_obj = {
+                "id": quiz.get("id"),
+                "question": quiz.get("question"),
+                "options": quiz.get("options"),  # Already JSONB array
+                "correct_answer": quiz.get("correct_answer"),  # Already integer (0-3)
+                "hint": quiz.get("hint"),
+                "points": 60,  # Default points value expected by frontend
+                "explanation": quiz.get("explanation", "")
+            }
+            quizzes.append(quiz_obj)
+        
+        logger.info(f"Retrieved quest detail: {quest_id} with {len(quizzes)} quizzes")
         
         return {
             "success": True,
             "quest": quest,
             "place": place.data if place.data else None,
-            "quizzes": quizzes.data if quizzes.data else []
+            "quizzes": quizzes
         }
     
     except HTTPException:

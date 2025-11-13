@@ -252,19 +252,14 @@ TTS 스트리밍
   "quests": [
     {
       "id": 1,
-      "place_id": "place-001",
-      "name": "경복궁 (Gyeongbokgung Palace)",
-      "title": "조선왕조의 법궁",
-      "description": "조선왕조의 법궁으로...",
-      "category": "역사유적",
-      "lat": 37.5796,
-      "lon": 126.9770,
-      "reward_point": 100,
-      "points": 10,
-      "difficulty": "easy",
-      "is_active": true,
-      "completion_count": 42,
-      "created_at": "2024-01-01T00:00:00Z"
+      "name": "경복궁",
+      "latitude": 37.5796,
+      "longitude": 126.9770,
+      "category": "Heritage",
+      "reward_point": 500,
+      "address": "서울특별시 종로구",
+      "description": "조선 왕조의 정궁",
+      "is_active": true
     }
   ]
 }
@@ -280,9 +275,9 @@ TTS 스트리밍
 
 ```json
 {
-  "lat": 37.5796,
-  "lon": 126.9770,
-  "radius_km": 1.0
+  "lat": 37.5665,
+  "lon": 126.9780,
+  "radius_km": 50.0
 }
 ```
 
@@ -300,12 +295,15 @@ TTS 스트리밍
 {
   "quests": [
     {
-      "id": 1,
-      "name": "경복궁",
-      "lat": 37.5796,
-      "lon": 126.9770,
-      "distance_km": 0.15,
-      "reward_point": 100
+      "quest_id": 1,
+      "title": "경복궁",
+      "latitude": 37.5796,
+      "longitude": 126.9770,
+      "category": "Heritage",
+      "distance_km": 2.0,
+      "reward_point": 500,
+      "address": "서울특별시 종로구",
+      "description": "..."
     }
   ],
   "count": 3
@@ -995,6 +993,7 @@ VLM 서비스 상태 확인
       "options": ["1392년", "1395년", "1400년", "1405년"],
       "correct_answer": 1,
       "hint": "조선 건국 후 3년",
+      "points": 60,
       "explanation": "1395년에 창건되었습니다."
     }
   ]

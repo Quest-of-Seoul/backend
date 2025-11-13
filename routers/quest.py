@@ -68,11 +68,15 @@ async def get_nearby_quests(request: NearbyQuestRequest):
         for quest in all_quests.data:
             distance = haversine_distance(
                 request.lat, request.lon,
-                quest['lat'], quest['lon']
+                quest['latitude'], quest['longitude']
             )
             if distance <= request.radius_km:
-                quest['distance_km'] = round(distance, 2)
-                nearby.append(quest)
+                # Add distance and rename fields for nearby endpoint
+                quest_obj = dict(quest)
+                quest_obj['quest_id'] = quest['id']  # Frontend expects quest_id for nearby
+                quest_obj['title'] = quest['name']   # Frontend expects title for nearby
+                quest_obj['distance_km'] = round(distance, 2)
+                nearby.append(quest_obj)
 
         # Sort by distance
         nearby.sort(key=lambda x: x['distance_km'])
