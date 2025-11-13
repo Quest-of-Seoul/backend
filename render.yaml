@@ -1,27 +1,33 @@
 services:
   - type: web
-    name: quest-of-seoul-api
+    name: quest-of-seoul-backend
     runtime: python
     env: python
-    region: oregon  # or singapore for Asia
-    plan: free  # or starter/standard for production
+    region: oregon
+    plan: free
     branch: main
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
+      # Server
       - key: PORT
         value: 10000
+      # Database
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_KEY
         sync: false
+      # Vector Database
       - key: PINECONE_API_KEY
         sync: false
+      # AI Services
       - key: OPENAI_API_KEY
         sync: false
-      - key: GEMINI_API_KEY
+      - key: GOOGLE_API_KEY
         sync: false
+      # Text-to-Speech
       - key: GOOGLE_APPLICATION_CREDENTIALS
         value: /etc/secrets/google-tts-credentials.json
+      # Optional
       - key: PRELOAD_CLIP_MODEL
         value: false

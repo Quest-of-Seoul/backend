@@ -1,6 +1,4 @@
-"""
-Quest router - Quest management endpoints
-"""
+"""Quest Router"""
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -8,7 +6,9 @@ from typing import Optional
 from services.db import get_db
 from datetime import datetime
 import math
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -25,13 +25,8 @@ class NearbyQuestRequest(BaseModel):
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Calculate distance between two points using Haversine formula
-
-    Returns distance in kilometers
-    """
-    R = 6371  # Earth's radius in km
-
+    """Calculate distance between two points using Haversine formula (returns km)"""
+    R = 6371
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
     delta_phi = math.radians(lat2 - lat1)
@@ -46,18 +41,16 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 @router.get("/list")
 async def get_all_quests():
-    """
-    Get all available quests
-    """
+    """Get all available quests"""
     try:
         db = get_db()
         result = db.table("quests").select("*").execute()
 
-        return {
-            "quests": result.data
-        }
+        logger.info(f"Retrieved {len(result.data)} quests")
+        return {"quests": result.data}
 
     except Exception as e:
+        logger.error(f"Error fetching quests: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching quests: {str(e)}")
 
 

@@ -1,38 +1,31 @@
-"""
-Database service - Supabase client
-VLM 이미지 분석 및 장소 검색 기능 포함
-"""
+"""Database Service - Supabase Client"""
 
 from supabase import create_client, Client
 import os
-from typing import List, Dict, Optional, Tuple
+import logging
+from typing import List, Dict, Optional
 
-# Initialize Supabase client
+logger = logging.getLogger(__name__)
+
+supabase_client = None
+
+
 def get_supabase() -> Client:
-    """Get Supabase client instance"""
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_SERVICE_KEY")
 
     if not url or not key:
-        raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in environment")
+        raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
 
     return create_client(url, key)
 
-# Singleton instance
-supabase_client = None
 
 def get_db() -> Client:
-    """Get or create Supabase client singleton"""
     global supabase_client
     if supabase_client is None:
         supabase_client = get_supabase()
     return supabase_client
 
-
-# ============================================================
-# 장소 검색 함수들
-# 벡터 검색은 services/pinecone_store.py 사용
-# ============================================================
 
 def search_places_by_radius(
     latitude: float,
@@ -40,22 +33,10 @@ def search_places_by_radius(
     radius_km: float = 1.0,
     limit_count: int = 10
 ) -> List[Dict]:
-    """
-    GPS 반경 내 장소 검색
-    
-    Args:
-        latitude: 위도
-        longitude: 경도
-        radius_km: 검색 반경 (km)
-        limit_count: 최대 결과 수
-    
-    Returns:
-        주변 장소 리스트 (거리 포함)
-    """
+    """Search places within GPS radius"""
     try:
         db = get_db()
         
-        # pgvector earthdistance 함수 호출
         result = db.rpc(
             "search_places_by_radius",
             {
@@ -67,77 +48,54 @@ def search_places_by_radius(
         ).execute()
         
         if not result.data:
-            print(f"[DB] No places found within {radius_km}km")
+            logger.info(f"No places found within {radius_km}km")
             return []
         
-        print(f"[DB] ✅ Found {len(result.data)} places within {radius_km}km")
+        logger.info(f"Found {len(result.data)} places within {radius_km}km")
         return result.data
     
     except Exception as e:
-        print(f"[DB] ❌ Error searching places by radius: {e}")
+        logger.error(f"Error searching places: {e}", exc_info=True)
         return []
 
 
 def get_place_by_id(place_id: str) -> Optional[Dict]:
-    """
-    장소 ID로 상세 정보 조회
-    
-    Args:
-        place_id: 장소 UUID
-    
-    Returns:
-        장소 정보 딕셔너리
-    """
+    """Get place by ID"""
     try:
         db = get_db()
         result = db.table("places").select("*").eq("id", place_id).single().execute()
         
         if result.data:
-            print(f"[DB] ✅ Found place: {result.data.get('name')}")
+            logger.info(f"Found place: {result.data.get('name')}")
             return result.data
         
         return None
     
     except Exception as e:
-        print(f"[DB] ❌ Error getting place: {e}")
+        logger.error(f"Error getting place: {e}", exc_info=True)
         return None
 
 
 def get_place_by_name(name: str, fuzzy: bool = True) -> Optional[Dict]:
-    """
-    장소명으로 검색
-    
-    Args:
-        name: 장소명
-        fuzzy: 퍼지 매칭 사용 여부
-    
-    Returns:
-        장소 정보 딕셔너리
-    """
+    """Search place by name with optional fuzzy matching"""
     try:
         db = get_db()
         
         if fuzzy:
-            # ILIKE를 사용한 부분 매칭
             result = db.table("places").select("*").ilike("name", f"%{name}%").limit(1).execute()
         else:
-            # 정확한 매칭
             result = db.table("places").select("*").eq("name", name).limit(1).execute()
         
         if result.data and len(result.data) > 0:
-            print(f"[DB] ✅ Found place: {result.data[0].get('name')}")
+            logger.info(f"Found place: {result.data[0].get('name')}")
             return result.data[0]
         
         return None
     
     except Exception as e:
-        print(f"[DB] ❌ Error searching place by name: {e}")
+        logger.error(f"Error searching place by name: {e}", exc_info=True)
         return None
 
-
-# ============================================================
-# VLM 로그 함수들
-# ============================================================
 
 def save_vlm_log(
     user_id: str,
@@ -154,27 +112,7 @@ def save_vlm_log(
     image_hash: Optional[str] = None,
     error_message: Optional[str] = None
 ) -> Optional[str]:
-    """
-    VLM 분석 로그 저장
-    
-    Args:
-        user_id: 사용자 ID
-        image_url: 이미지 URL
-        latitude: 촬영 위치 위도
-        longitude: 촬영 위치 경도
-        vlm_provider: VLM 제공자 (gpt4v)
-        vlm_response: VLM 원본 응답
-        final_description: 최종 설명
-        matched_place_id: 매칭된 장소 ID
-        similar_places: 유사 장소 리스트
-        confidence_score: 신뢰도 점수
-        processing_time_ms: 처리 시간
-        image_hash: 이미지 해시
-        error_message: 에러 메시지
-    
-    Returns:
-        로그 ID
-    """
+    """Save VLM analysis log"""
     try:
         db = get_db()
         
@@ -214,31 +152,20 @@ def save_vlm_log(
         
         if result.data and len(result.data) > 0:
             log_id = result.data[0].get("id")
-            print(f"[DB] ✅ VLM log saved: {log_id}")
+            logger.info(f"VLM log saved: {log_id}")
             return log_id
         
         return None
     
     except Exception as e:
-        print(f"[DB] ❌ Error saving VLM log: {e}")
+        logger.error(f"Error saving VLM log: {e}", exc_info=True)
         return None
 
 
 def get_cached_vlm_result(image_hash: str, max_age_hours: int = 24) -> Optional[Dict]:
-    """
-    이미지 해시로 캐싱된 VLM 결과 조회
-    
-    Args:
-        image_hash: 이미지 SHA-256 해시
-        max_age_hours: 최대 캐시 유효 시간
-    
-    Returns:
-        캐싱된 VLM 로그
-    """
+    """Get cached VLM result by image hash"""
     try:
         db = get_db()
-        
-        # 최근 N시간 이내 결과만 조회
         from datetime import datetime, timedelta
         cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
         
@@ -251,70 +178,32 @@ def get_cached_vlm_result(image_hash: str, max_age_hours: int = 24) -> Optional[
             .execute()
         
         if result.data and len(result.data) > 0:
-            print(f"[DB] ✅ Found cached VLM result for hash: {image_hash[:16]}...")
+            logger.info(f"Found cached VLM result for hash: {image_hash[:16]}...")
             return result.data[0]
         
         return None
     
     except Exception as e:
-        print(f"[DB] ❌ Error getting cached result: {e}")
+        logger.error(f"Error getting cached result: {e}", exc_info=True)
         return None
 
 
 def increment_place_view_count(place_id: str) -> bool:
-    """
-    장소 조회수 증가
-    
-    Args:
-        place_id: 장소 UUID
-    
-    Returns:
-        성공 여부
-    """
+    """Increment place view count"""
     try:
         db = get_db()
-        
-        # 현재 조회수 가져오기
         place = get_place_by_id(place_id)
         if not place:
             return False
         
         current_count = place.get("view_count", 0)
-        
-        # 조회수 증가
         db.table("places").update({"view_count": current_count + 1}).eq("id", place_id).execute()
         
-        print(f"[DB] ✅ Incremented view count for place: {place_id}")
+        logger.info(f"Incremented view count for place: {place_id}")
         return True
     
     except Exception as e:
-        print(f"[DB] ❌ Error incrementing view count: {e}")
+        logger.error(f"Error incrementing view count: {e}", exc_info=True)
         return False
 
 
-def get_popular_places(limit: int = 10) -> List[Dict]:
-    """
-    인기 장소 조회 (조회수 기준)
-    
-    Args:
-        limit: 최대 결과 수
-    
-    Returns:
-        인기 장소 리스트
-    """
-    try:
-        db = get_db()
-        
-        result = db.table("places") \
-            .select("*") \
-            .eq("is_active", True) \
-            .order("view_count", desc=True) \
-            .limit(limit) \
-            .execute()
-        
-        print(f"[DB] ✅ Retrieved {len(result.data)} popular places")
-        return result.data
-    
-    except Exception as e:
-        print(f"[DB] ❌ Error getting popular places: {e}")
-        return []
