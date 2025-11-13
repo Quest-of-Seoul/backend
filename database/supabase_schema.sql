@@ -205,6 +205,7 @@ CREATE INDEX idx_vlm_logs_pinecone_id ON vlm_logs(pinecone_vector_id);
 -- Functions
 
 -- Get user total points
+DROP FUNCTION IF EXISTS get_user_points(UUID);
 CREATE OR REPLACE FUNCTION get_user_points(user_uuid UUID)
 RETURNS INTEGER AS $$
 DECLARE
@@ -218,6 +219,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Search places by radius (Haversine formula)
+DROP FUNCTION IF EXISTS search_places_by_radius(DECIMAL, DECIMAL, FLOAT, INTEGER);
 CREATE OR REPLACE FUNCTION search_places_by_radius(
     lat DECIMAL(10, 8),
     lon DECIMAL(11, 8),
@@ -260,6 +262,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Search nearby quests
+DROP FUNCTION IF EXISTS search_nearby_quests(DECIMAL, DECIMAL, FLOAT, INTEGER);
 CREATE OR REPLACE FUNCTION search_nearby_quests(
     lat DECIMAL(10, 8),
     lon DECIMAL(11, 8),
@@ -302,6 +305,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Get user VLM logs
+DROP FUNCTION IF EXISTS get_user_vlm_logs(UUID, INTEGER);
 CREATE OR REPLACE FUNCTION get_user_vlm_logs(
     user_uuid UUID,
     limit_count INTEGER
@@ -336,6 +340,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Get cached VLM result by image hash
+DROP FUNCTION IF EXISTS get_cached_vlm_result(VARCHAR);
 CREATE OR REPLACE FUNCTION get_cached_vlm_result(hash VARCHAR(64))
 RETURNS TABLE (
     id UUID,
