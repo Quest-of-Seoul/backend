@@ -1,113 +1,87 @@
-"""
-AI service - Google Gemini LLM integration
-"""
+"""AI Service - Google Gemini"""
 
 import google.generativeai as genai
 import os
+import logging
+import json
 from typing import Optional
 
-# Configure Gemini
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+logger = logging.getLogger(__name__)
 
-# Initialize model - using gemini-2.5-flash (latest stable model)
-model = genai.GenerativeModel('gemini-2.5-flash')
+api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+if api_key:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.5-flash')
+    GEMINI_AVAILABLE = True
+else:
+    logger.warning("GOOGLE_API_KEY or GEMINI_API_KEY not set")
+    model = None
+    GEMINI_AVAILABLE = False
 
 def generate_docent_message(
     landmark: str,
     user_message: Optional[str] = None,
     language: str = "ko"
 ) -> str:
-    """
-    Generate AI docent response about a landmark
-
-    Args:
-        landmark: Name of the landmark
-        user_message: Optional user question
-        language: Response language (ko/en)
-
-    Returns:
-        AI-generated docent message
-    """
-
-    # Build prompt based on language
+    """Generate AI docent response"""
+    
     if language == "ko":
-        base_prompt = f"""
-당신은 서울을 안내하는 친근한 AI 도슨트입니다.
+        base_prompt = f"""당신은 '{landmark}'에 대한 친절한 AI 도슨트입니다.
 
-랜드마크: {landmark}
+{f'질문: {user_message}' if user_message else '이 장소를 소개해주세요.'}
 
-다음 형식으로 응답해주세요:
-1. 간단한 인사와 랜드마크 소개 (2-3문장)
-2. 흥미로운 역사적 사실이나 재미있는 이야기 (2-3문장)
-3. 방문 팁이나 추천 사항 (1-2문장)
+친근하고 흥미롭게 3-4문장으로 답변해주세요."""
+    else:
+        base_prompt = f"""You are a friendly AI docent for '{landmark}'.
 
-친근하고 대화하는 듯한 톤으로 작성해주세요.
-"""
-        if user_message:
-            base_prompt += f"\n\n사용자 질문: {user_message}\n위 질문에 대해서도 답변해주세요."
-    else:  # English
-        base_prompt = f"""
-You are a friendly AI docent guiding visitors through Seoul.
+{f'Question: {user_message}' if user_message else 'Please introduce this place.'}
 
-Landmark: {landmark}
-
-Please respond in this format:
-1. Brief greeting and landmark introduction (2-3 sentences)
-2. Interesting historical fact or fun story (2-3 sentences)
-3. Visiting tips or recommendations (1-2 sentences)
-
-Use a friendly, conversational tone.
-"""
-        if user_message:
-            base_prompt += f"\n\nUser question: {user_message}\nPlease also answer this question."
+Provide an engaging response in 3-4 sentences."""
 
     try:
         response = model.generate_content(base_prompt)
         return response.text
     except Exception as e:
-        print(f"Error generating AI response: {e}")
-        return "죄송합니다. 지금은 응답을 생성할 수 없습니다." if language == "ko" else "Sorry, I cannot generate a response right now."
+        logger.error(f"Gemini error: {e}", exc_info=True)
+        return "응답을 생성할 수 없습니다." if language == "ko" else "Cannot generate response."
 
 
 def generate_quiz(landmark: str, language: str = "ko") -> dict:
-    """
-    Generate a quiz question about the landmark
+    """Generate quiz about landmark"""
+    
+    if language == "ko":
+        prompt = f"""{landmark}에 대한 퀴즈를 만들어주세요.
 
-    Args:
-        landmark: Name of the landmark
-        language: Quiz language (ko/en)
-
-    Returns:
-        Dict with question, options, and correct answer
-    """
-
-    prompt = f"""
-Generate a multiple choice quiz question about {landmark} in Seoul.
-
-Return ONLY a JSON object in this exact format (no markdown, no extra text):
+다음 JSON 형식으로 반환:
 {{
-    "question": "quiz question here",
-    "options": ["option A", "option B", "option C", "option D"],
-    "correct_answer": 0
-}}
+    "question": "퀴즈 질문",
+    "options": ["선택지1", "선택지2", "선택지3", "선택지4"],
+    "correct_answer": 0,
+    "explanation": "정답 설명"
+}}"""
+    else:
+        prompt = f"""Create a quiz about {landmark}.
 
-Where correct_answer is the index (0-3) of the correct option.
-Language: {"Korean" if language == "ko" else "English"}
-"""
+Return in JSON format:
+{{
+    "question": "Quiz question",
+    "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
+    "correct_answer": 0,
+    "explanation": "Explanation"
+}}"""
 
     try:
         response = model.generate_content(prompt)
-        # Parse response as JSON
-        import json
-        # Remove markdown code blocks if present
         text = response.text.strip()
-        if text.startswith("```"):
+        
+        if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
+        
         return json.loads(text.strip())
     except Exception as e:
-        print(f"Error generating quiz: {e}")
+        logger.error(f"Quiz generation error: {e}", exc_info=True)
         return {
             "question": "퀴즈를 생성할 수 없습니다." if language == "ko" else "Cannot generate quiz.",
             "options": ["A", "B", "C", "D"],

@@ -1,13 +1,13 @@
-"""
-Reward router - Points and rewards management
-"""
+"""Reward Router"""
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from services.db import get_db
 from datetime import datetime
 import secrets
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -24,21 +24,15 @@ class AddPointsRequest(BaseModel):
 
 @router.get("/points/{user_id}")
 async def get_user_points(user_id: str):
-    """
-    Get user's total points balance
-    """
+    """Get user's total points balance"""
     try:
-        print(f"📡 Getting points for user_id: {user_id}")  # 디버그
+        logger.info(f"Getting points for user: {user_id}")
 
         db = get_db()
 
-        # Get total points using the database function
         result = db.rpc("get_user_points", {"user_uuid": user_id}).execute()
         total_points = result.data if result.data else 0
 
-        print(f"✅ Total points: {total_points}")  # 디버그
-
-        # Get recent transactions
         transactions = db.table("points") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -46,7 +40,7 @@ async def get_user_points(user_id: str):
             .limit(10) \
             .execute()
 
-        print(f"✅ Transactions count: {len(transactions.data)}")  # 디버그
+        logger.info(f"Total points: {total_points}, transactions: {len(transactions.data)}")
 
         return {
             "total_points": total_points,
@@ -54,51 +48,41 @@ async def get_user_points(user_id: str):
         }
 
     except Exception as e:
-        print(f"❌ Error in get_user_points: {str(e)}")  # 디버그
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error getting points: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching points: {str(e)}")
 
 
 @router.post("/points/add")
 async def add_points(request: AddPointsRequest):
-    """
-    Add points to user's account
-    """
+    """Add points to user's account"""
     try:
-        print(f"📡 Adding {request.points} points to user_id: {request.user_id}")  # 디버그
+        logger.info(f"Adding {request.points} points to user: {request.user_id}")
 
         if request.points <= 0:
             raise HTTPException(status_code=400, detail="Points must be greater than 0")
 
         db = get_db()
 
-        # Ensure user exists in users table (create if not exists)
         user_check = db.table("users").select("id").eq("id", request.user_id).execute()
         if not user_check.data:
-            # Create user if doesn't exist
-            print(f"📝 Creating user {request.user_id} in users table")
+            logger.info(f"Creating new user: {request.user_id}")
             db.table("users").insert({
                 "id": request.user_id,
-                "email": f"{request.user_id}@temp.com",  # Temporary email
+                "email": f"{request.user_id}@temp.com",
                 "nickname": "Guest User"
             }).execute()
 
-        # Get current points balance
         current_points_result = db.rpc("get_user_points", {"user_uuid": request.user_id}).execute()
         current_points = current_points_result.data if current_points_result.data else 0
 
-        # Add points to the points table
         db.table("points").insert({
             "user_id": request.user_id,
             "value": request.points,
             "reason": request.reason
         }).execute()
 
-        # Calculate new balance
         new_balance = current_points + request.points
-
-        print(f"✅ Points added successfully. New balance: {new_balance}")  # 디버그
+        logger.info(f"Points added successfully. New balance: {new_balance}")
 
         return {
             "status": "success",
@@ -112,9 +96,7 @@ async def add_points(request: AddPointsRequest):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error in add_points: {str(e)}")  # 디버그
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error adding points: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error adding points: {str(e)}")
 
 

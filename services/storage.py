@@ -1,146 +1,115 @@
-"""
-Supabase Storage service - File upload and management
-"""
+"""Supabase Storage Service"""
 
 from supabase import Client
 from services.db import get_db
 import uuid
 import os
+import logging
 from typing import Optional
+from PIL import Image, ImageOps
+from io import BytesIO
+import hashlib
+
+logger = logging.getLogger(__name__)
 
 
 def upload_audio_to_storage(audio_bytes: bytes, filename: Optional[str] = None) -> Optional[str]:
-    """
-    Upload audio file to Supabase Storage and return public URL
-
-    Args:
-        audio_bytes: Audio file content as bytes
-        filename: Optional custom filename (auto-generated if not provided)
-
-    Returns:
-        Public URL of uploaded file, or None if upload fails
-    """
+    """Upload audio file to Supabase Storage"""
     try:
         supabase: Client = get_db()
 
-        # Generate unique filename if not provided
         if not filename:
             filename = f"tts_{uuid.uuid4()}.mp3"
         elif not filename.endswith('.mp3'):
             filename = f"{filename}.mp3"
 
-        # Upload to Supabase Storage 'tts' bucket
         response = supabase.storage.from_("tts").upload(
             path=filename,
             file=audio_bytes,
             file_options={
                 "content-type": "audio/mpeg",
-                "cache-control": "3600",  # Cache for 1 hour
-                "upsert": "true"  # Overwrite if exists
+                "cache-control": "3600",
+                "upsert": "true"
             }
         )
 
-        print(f"[Storage] Upload response: {response}")
+        logger.debug(f"Upload response: {response}")
 
-        # Get public URL
         public_url = supabase.storage.from_("tts").get_public_url(filename)
 
-        # Remove trailing '?' if present
         if public_url and public_url.endswith('?'):
             public_url = public_url[:-1]
 
-        print(f"[Storage] ✅ Audio uploaded: {public_url}")
+        logger.info(f"Audio uploaded: {public_url}")
         return public_url
 
     except Exception as e:
-        print(f"[Storage] ❌ Upload failed: {e}")
+        logger.error(f"Upload failed: {e}", exc_info=True)
         return None
 
 
-def delete_audio_from_storage(filename: str) -> bool:
-    """
-    Delete audio file from Supabase Storage
-
-    Args:
-        filename: Name of file to delete
-
-    Returns:
-        True if deletion successful, False otherwise
-    """
+def compress_and_upload_image(
+    image_bytes: bytes,
+    max_size: int = 1920,
+    quality: int = 85,
+    bucket: str = "images"
+) -> Optional[str]:
+    """Compress and upload image to Supabase Storage"""
     try:
         supabase: Client = get_db()
-
-        response = supabase.storage.from_("tts").remove([filename])
-
-        print(f"[Storage] ✅ Deleted: {filename}")
-        return True
-
-    except Exception as e:
-        print(f"[Storage] ❌ Delete failed: {e}")
-        return False
-
-
-def list_audio_files(limit: int = 100) -> list:
-    """
-    List audio files in Supabase Storage
-
-    Args:
-        limit: Maximum number of files to return
-
-    Returns:
-        List of file objects
-    """
-    try:
-        supabase: Client = get_db()
-
-        response = supabase.storage.from_("tts").list(
-            options={"limit": limit, "sortBy": {"column": "created_at", "order": "desc"}}
+        
+        img = Image.open(BytesIO(image_bytes))
+        
+        try:
+            img = ImageOps.exif_transpose(img)
+        except:
+            pass
+        
+        if img.mode in ('RGBA', 'P', 'LA'):
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'RGBA':
+                background.paste(img, mask=img.split()[3])
+            else:
+                background.paste(img)
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        if max(img.size) > max_size:
+            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            logger.info(f"Resized to: {img.size}")
+        
+        output = BytesIO()
+        img.save(output, format='JPEG', quality=quality, optimize=True)
+        compressed_bytes = output.getvalue()
+        
+        original_size = len(image_bytes) / 1024
+        compressed_size = len(compressed_bytes) / 1024
+        logger.info(f"Compressed: {original_size:.1f}KB → {compressed_size:.1f}KB")
+        
+        img_hash = hashlib.sha256(compressed_bytes).hexdigest()[:16]
+        filename = f"place_{img_hash}.jpeg"
+        
+        content_type = 'image/jpeg'
+        
+        response = supabase.storage.from_(bucket).upload(
+            path=filename,
+            file=compressed_bytes,
+            file_options={
+                "content-type": content_type,
+                "cache-control": "31536000",
+                "upsert": "true"
+            }
         )
-
-        return response
-
+        
+        public_url = supabase.storage.from_(bucket).get_public_url(filename)
+        
+        if public_url and public_url.endswith('?'):
+            public_url = public_url[:-1]
+        
+        logger.info(f"Image uploaded: {public_url}")
+        return public_url
+    
     except Exception as e:
-        print(f"[Storage] ❌ List failed: {e}")
-        return []
-
-
-def cleanup_old_files(hours: int = 24) -> int:
-    """
-    Clean up audio files older than specified hours
-
-    Args:
-        hours: Delete files older than this many hours
-
-    Returns:
-        Number of files deleted
-    """
-    try:
-        from datetime import datetime, timedelta
-
-        supabase: Client = get_db()
-
-        # Get all files
-        files = supabase.storage.from_("tts").list()
-
-        # Calculate cutoff time
-        cutoff = datetime.now() - timedelta(hours=hours)
-
-        # Filter old files
-        old_files = []
-        for file in files:
-            created_at = datetime.fromisoformat(file.get("created_at", "").replace("Z", "+00:00"))
-            if created_at < cutoff:
-                old_files.append(file["name"])
-
-        # Delete old files
-        if old_files:
-            supabase.storage.from_("tts").remove(old_files)
-            print(f"[Storage] 🗑️  Cleaned up {len(old_files)} old files")
-            return len(old_files)
-
-        print(f"[Storage] No files to clean up")
-        return 0
-
-    except Exception as e:
-        print(f"[Storage] ❌ Cleanup failed: {e}")
-        return 0
+        logger.error(f"Image upload failed: {e}", exc_info=True)
+        return None

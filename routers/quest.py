@@ -1,6 +1,4 @@
-"""
-Quest router - Quest management endpoints
-"""
+"""Quest Router"""
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -8,7 +6,9 @@ from typing import Optional
 from services.db import get_db
 from datetime import datetime
 import math
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -25,13 +25,8 @@ class NearbyQuestRequest(BaseModel):
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Calculate distance between two points using Haversine formula
-
-    Returns distance in kilometers
-    """
-    R = 6371  # Earth's radius in km
-
+    """Calculate distance between two points using Haversine formula (returns km)"""
+    R = 6371
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
     delta_phi = math.radians(lat2 - lat1)
@@ -46,18 +41,16 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 @router.get("/list")
 async def get_all_quests():
-    """
-    Get all available quests
-    """
+    """Get all available quests"""
     try:
         db = get_db()
         result = db.table("quests").select("*").execute()
 
-        return {
-            "quests": result.data
-        }
+        logger.info(f"Retrieved {len(result.data)} quests")
+        return {"quests": result.data}
 
     except Exception as e:
+        logger.error(f"Error fetching quests: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching quests: {str(e)}")
 
 
@@ -75,11 +68,15 @@ async def get_nearby_quests(request: NearbyQuestRequest):
         for quest in all_quests.data:
             distance = haversine_distance(
                 request.lat, request.lon,
-                quest['lat'], quest['lon']
+                quest['latitude'], quest['longitude']
             )
             if distance <= request.radius_km:
-                quest['distance_km'] = round(distance, 2)
-                nearby.append(quest)
+                # Add distance and rename fields for nearby endpoint
+                quest_obj = dict(quest)
+                quest_obj['quest_id'] = quest['id']  # Frontend expects quest_id for nearby
+                quest_obj['title'] = quest['name']   # Frontend expects title for nearby
+                quest_obj['distance_km'] = round(distance, 2)
+                nearby.append(quest_obj)
 
         # Sort by distance
         nearby.sort(key=lambda x: x['distance_km'])
