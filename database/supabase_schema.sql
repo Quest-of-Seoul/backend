@@ -407,6 +407,19 @@ VALUES
     ('인사동 (Insadong)', '전통 문화와 예술이 살아있는 거리입니다.', 37.5730, 126.9856, 90),
     ('홍대 (Hongdae)', '젊음과 문화가 넘치는 예술의 거리입니다.', 37.5563, 126.9236, 70);
 
+-- Update quests with place_id based on location matching (within 0.01 degrees ~ 1km)
+UPDATE quests q
+SET place_id = (
+    SELECT p.id
+    FROM places p
+    WHERE ABS(p.latitude - q.latitude) < 0.01
+      AND ABS(p.longitude - q.longitude) < 0.01
+    ORDER BY 
+        ABS(p.latitude - q.latitude) + ABS(p.longitude - q.longitude)
+    LIMIT 1
+)
+WHERE q.place_id IS NULL;
+
 -- Sample Rewards
 INSERT INTO rewards (name, type, point_cost, description, is_active)
 VALUES

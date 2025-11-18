@@ -196,7 +196,17 @@ async def get_quest_detail(quest_id: int):
         if not result.data:
             raise HTTPException(status_code=404, detail="Quest not found")
 
-        return result.data[0]
+        quest = result.data[0]
+        
+        # place_id가 있으면 해당 place의 이미지 정보 조회
+        if quest.get("place_id"):
+            place_result = db.table("places").select("image_url, images").eq("id", quest["place_id"]).execute()
+            if place_result.data:
+                place = place_result.data[0]
+                quest["image_url"] = place.get("image_url")
+                quest["images"] = place.get("images")
+
+        return quest
 
     except HTTPException:
         raise
