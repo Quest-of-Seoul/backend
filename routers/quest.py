@@ -187,16 +187,39 @@ async def get_user_quests(user_id: str, status: Optional[str] = None):
 @router.get("/{quest_id}")
 async def get_quest_detail(quest_id: int):
     """
-    Get detailed information about a specific quest
+    Get detailed information about a specific quest with place information
     """
     try:
         db = get_db()
-        result = db.table("quests").select("*").eq("id", quest_id).execute()
+        # Join with places table to get place information (latitude, longitude, image_url, description, address)
+        result = db.table("quests").select("*, places(*)").eq("id", quest_id).execute()
 
         if not result.data:
             raise HTTPException(status_code=404, detail="Quest not found")
 
-        return result.data[0]
+        quest_data = result.data[0]
+        
+        # If place_id exists and places data is available, merge place information
+        if quest_data.get("place_id") and quest_data.get("places"):
+            place = quest_data["places"]
+            # Add place information to quest response
+            quest_data["place"] = {
+                "id": place.get("id"),
+                "name": place.get("name"),
+                "name_en": place.get("name_en"),
+                "description": place.get("description"),
+                "category": place.get("category"),
+                "address": place.get("address"),
+                "latitude": float(place.get("latitude")) if place.get("latitude") else None,
+                "longitude": float(place.get("longitude")) if place.get("longitude") else None,
+                "image_url": place.get("image_url"),
+                "images": place.get("images"),
+                "metadata": place.get("metadata")
+            }
+            # Remove the nested places object
+            del quest_data["places"]
+        
+        return quest_data
 
     except HTTPException:
         raise
