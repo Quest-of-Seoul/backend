@@ -38,6 +38,19 @@ CREATE INDEX idx_places_name ON places(name);
 CREATE INDEX idx_places_name_en ON places(name_en);
 CREATE INDEX idx_places_location ON places(latitude, longitude);
 CREATE INDEX idx_places_is_active ON places(is_active);
+CREATE INDEX idx_places_source ON places(source);
+CREATE INDEX idx_places_category_source ON places(category, source);
+
+-- JSONB 필드에 대한 GIN 인덱스
+CREATE INDEX idx_places_metadata_gin ON places USING GIN (metadata);
+CREATE INDEX idx_places_images_gin ON places USING GIN (images);
+
+ALTER TABLE places 
+DROP CONSTRAINT IF EXISTS check_places_source;
+
+ALTER TABLE places 
+ADD CONSTRAINT check_places_source 
+CHECK (source IN ('manual', 'tour_api', 'visit_seoul', 'both'));
 
 -- Update timestamp trigger for places
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -386,6 +399,68 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Search places by RAG text
+DROP FUNCTION IF EXISTS search_places_by_rag_text(TEXT, INTEGER);
+CREATE OR REPLACE FUNCTION search_places_by_rag_text(
+    search_query TEXT,
+    limit_count INTEGER DEFAULT 10
+)
+RETURNS TABLE (
+    id UUID,
+    name VARCHAR(255),
+    category VARCHAR(50),
+    rag_text TEXT,
+    similarity_score FLOAT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        p.id,
+        p.name,
+        p.category,
+        p.metadata->>'rag_text' AS rag_text,
+        ts_rank(
+            to_tsvector('korean', COALESCE(p.metadata->>'rag_text', '')),
+            plainto_tsquery('korean', search_query)
+        ) AS similarity_score
+    FROM places p
+    WHERE p.is_active = TRUE
+        AND p.metadata->>'rag_text' IS NOT NULL
+        AND to_tsvector('korean', p.metadata->>'rag_text') @@ plainto_tsquery('korean', search_query)
+    ORDER BY similarity_score DESC
+    LIMIT limit_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Get category statistics
+DROP FUNCTION IF EXISTS get_category_stats();
+CREATE OR REPLACE FUNCTION get_category_stats()
+RETURNS TABLE (
+    category VARCHAR(50),
+    total_count BIGINT,
+    tour_api_count BIGINT,
+    visit_seoul_count BIGINT,
+    both_count BIGINT,
+    with_images BIGINT,
+    with_embeddings BIGINT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        p.category,
+        COUNT(*)::BIGINT AS total_count,
+        COUNT(*) FILTER (WHERE p.source = 'tour_api')::BIGINT AS tour_api_count,
+        COUNT(*) FILTER (WHERE p.source = 'visit_seoul')::BIGINT AS visit_seoul_count,
+        COUNT(*) FILTER (WHERE p.source = 'both')::BIGINT AS both_count,
+        COUNT(*) FILTER (WHERE p.image_url IS NOT NULL)::BIGINT AS with_images,
+        COUNT(*) FILTER (WHERE p.metadata->>'rag_text' IS NOT NULL)::BIGINT AS with_embeddings
+    FROM places p
+    WHERE p.is_active = TRUE
+    GROUP BY p.category
+    ORDER BY total_count DESC;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Sample Data
 
 -- Sample Places
@@ -441,3 +516,12 @@ COMMENT ON TABLE rewards IS '포인트로 교환 가능한 리워드 아이템';
 COMMENT ON TABLE user_rewards IS '사용자가 획득한 리워드 목록';
 COMMENT ON TABLE chat_logs IS 'AI 도슨트 대화 기록';
 COMMENT ON TABLE vlm_logs IS 'VLM 이미지 분석 로그';
+
+-- Column Comments for places table
+COMMENT ON COLUMN places.source IS '데이터 출처: manual(수동입력), tour_api(TourAPI), visit_seoul(VISIT SEOUL API), both(양쪽 모두)';
+COMMENT ON COLUMN places.metadata IS '상세 메타데이터 (JSONB): tour_api, visit_seoul, rag_text 등 포함';
+COMMENT ON COLUMN places.images IS '이미지 URL 배열 (JSONB)';
+
+-- Update table statistics for query optimization
+ANALYZE places;
+ANALYZE quests;
