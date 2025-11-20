@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 from io import BytesIO
 from PIL import Image
 import numpy as np
+from services.cache import get_image_embedding_cache, cache_key_image
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,15 @@ def load_clip_model() -> Tuple[Optional[object], Optional[object], Optional[str]
 
 
 def generate_image_embedding(image_bytes: bytes) -> Optional[List[float]]:
-    """Generate image embedding"""
+    """Generate image embedding with caching"""
+    cache = get_image_embedding_cache()
+    cache_key = cache_key_image(image_bytes)
+    
+    cached_embedding = cache.get(cache_key)
+    if cached_embedding is not None:
+        logger.info(f"Using cached embedding: {len(cached_embedding)} dimensions")
+        return cached_embedding
+    
     model, processor, device = load_clip_model()
     
     if model is None:
@@ -74,6 +83,8 @@ def generate_image_embedding(image_bytes: bytes) -> Optional[List[float]]:
         
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         embedding = image_features.cpu().numpy().flatten().tolist()
+        
+        cache.set(cache_key, embedding, ttl=86400)  # 24 hours
         
         logger.info(f"Generated embedding: {len(embedding)} dimensions")
         return embedding

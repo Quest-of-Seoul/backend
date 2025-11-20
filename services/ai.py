@@ -4,7 +4,9 @@ import google.generativeai as genai
 import os
 import logging
 import json
+import asyncio
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +20,11 @@ else:
     model = None
     GEMINI_AVAILABLE = False
 
-def generate_docent_message(
-    landmark: str,
-    user_message: Optional[str] = None,
-    language: str = "ko"
-) -> str:
-    """Generate AI docent response"""
-    
+_executor = ThreadPoolExecutor(max_workers=5)
+
+
+def _generate_docent_sync(landmark: str, user_message: Optional[str], language: str) -> str:
+    """Synchronous docent message generation"""
     if language == "ko":
         base_prompt = f"""당신은 '{landmark}'에 대한 친절한 AI 도슨트입니다.
 
@@ -46,9 +46,21 @@ Provide an engaging response in 3-4 sentences."""
         return "응답을 생성할 수 없습니다." if language == "ko" else "Cannot generate response."
 
 
-def generate_quiz(landmark: str, language: str = "ko") -> dict:
-    """Generate quiz about landmark"""
+async def generate_docent_message(
+    landmark: str,
+    user_message: Optional[str] = None,
+    language: str = "ko"
+) -> str:
+    """Generate AI docent response"""
+    if not GEMINI_AVAILABLE:
+        return "응답을 생성할 수 없습니다." if language == "ko" else "Cannot generate response."
     
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, _generate_docent_sync, landmark, user_message, language)
+
+
+def _generate_quiz_sync(landmark: str, language: str) -> dict:
+    """Synchronous quiz generation"""
     if language == "ko":
         prompt = f"""{landmark}에 대한 퀴즈를 만들어주세요.
 
@@ -87,3 +99,16 @@ Return in JSON format:
             "options": ["A", "B", "C", "D"],
             "correct_answer": 0
         }
+
+
+async def generate_quiz(landmark: str, language: str = "ko") -> dict:
+    """Generate quiz about landmark"""
+    if not GEMINI_AVAILABLE:
+        return {
+            "question": "퀴즈를 생성할 수 없습니다." if language == "ko" else "Cannot generate quiz.",
+            "options": ["A", "B", "C", "D"],
+            "correct_answer": 0
+        }
+    
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, _generate_quiz_sync, landmark, language)

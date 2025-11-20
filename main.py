@@ -22,7 +22,36 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Quest of Seoul API starting up...")
+    
+    try:
+        from services.db import get_db
+        from services.tts import get_tts_client
+        from services.pinecone_store import get_pinecone_index
+        
+        get_db()
+        logger.info("Database connection initialized")
+        
+        get_tts_client()
+        logger.info("TTS client initialized")
+        
+        get_pinecone_index()
+        logger.info("Pinecone index initialized")
+        
+    except Exception as e:
+        logger.warning(f"Service initialization warning: {e}")
+    
     yield
+    
+    try:
+        from services.cache import get_image_embedding_cache, get_place_cache, get_tts_cache
+        
+        cache = get_image_embedding_cache()
+        removed = cache.cleanup_expired()
+        if removed > 0:
+            logger.info(f"Cleaned up {removed} expired cache entries")
+    except Exception as e:
+        logger.warning(f"Cache cleanup warning: {e}")
+    
     logger.info("Quest of Seoul API shutting down...")
 
 

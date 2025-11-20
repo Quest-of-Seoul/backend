@@ -6,7 +6,9 @@ from typing import Optional, List
 import base64
 import time
 import logging
+import asyncio
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor
 
 from services.vlm import (
     analyze_place_image,
@@ -28,6 +30,8 @@ from services.storage import upload_audio_to_storage, compress_and_upload_image
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_upload_executor = ThreadPoolExecutor(max_workers=3)
 
 
 class VLMAnalyzeRequest(BaseModel):
@@ -167,7 +171,7 @@ VLM 분석 결과:
 위 정보를 바탕으로 AR 도슨트처럼 친근하고 흥미롭게 3-4문장으로 이 장소를 소개해주세요.
 """
             try:
-                final_description = generate_docent_message(
+                final_description = await generate_docent_message(
                     landmark=matched_place.get('name', '이 장소'),
                     user_message=enhancement_prompt if request.language == "ko" else None,
                     language=request.language
@@ -176,40 +180,64 @@ VLM 분석 결과:
             except Exception as e:
                 logger.warning(f"Gemini enhancement failed: {e}")
         
+        processing_time_ms = int((time.time() - start_time) * 1000)
+        logger.info(f"Processing time: {processing_time_ms}ms")
+        
         audio_url = None
         audio_base64 = None
+        uploaded_image_url = None
         
-        if request.enable_tts:
+        async def generate_tts_async():
+            """Generate TTS in parallel"""
+            if not request.enable_tts:
+                return None, None
+            
             try:
                 language_code = f"{request.language}-KR" if request.language == "ko" else "en-US"
                 
                 if request.prefer_url:
-                    audio_url, audio_base64 = text_to_speech_url(
+                    url, base64_audio = await text_to_speech_url(
                         text=final_description,
                         language_code=language_code,
                         upload_to_storage=True
                     )
                     logger.info("TTS generated (URL)")
+                    return url, base64_audio
                 else:
-                    audio_base64 = text_to_speech(
+                    base64_audio = await text_to_speech(
                         text=final_description,
                         language_code=language_code
                     )
                     logger.info("TTS generated (base64)")
-            
+                    return None, base64_audio
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
+                return None, None
         
-        processing_time_ms = int((time.time() - start_time) * 1000)
-        logger.info(f"Processing time: {processing_time_ms}ms")
+        async def upload_image_async():
+            """Upload image in parallel"""
+            try:
+                loop = asyncio.get_event_loop()
+                url = await loop.run_in_executor(
+                    _upload_executor,
+                    compress_and_upload_image,
+                    image_bytes,
+                    1920,
+                    85
+                )
+                return url
+            except Exception as upload_error:
+                logger.warning(f"Image upload failed: {upload_error}")
+                return None
+        
+        tts_task = generate_tts_async()
+        upload_task = upload_image_async()
+        
+        (audio_url, audio_base64), uploaded_image_url = await asyncio.gather(
+            tts_task, upload_task
+        )
         
         try:
-            uploaded_image_url = compress_and_upload_image(
-                image_bytes=image_bytes,
-                max_size=1920,
-                quality=85
-            )
-            
             save_vlm_log(
                 user_id=request.user_id,
                 image_url=uploaded_image_url,

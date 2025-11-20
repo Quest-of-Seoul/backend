@@ -4,6 +4,7 @@ from supabase import create_client, Client
 import os
 import logging
 from typing import List, Dict, Optional
+from services.cache import get_place_cache, cache_key_place
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +61,21 @@ def search_places_by_radius(
 
 
 def get_place_by_id(place_id: str) -> Optional[Dict]:
-    """Get place by ID"""
+    """Get place by ID with caching"""
+    cache = get_place_cache()
+    cache_key = cache_key_place(place_id)
+    
+    cached_place = cache.get(cache_key)
+    if cached_place is not None:
+        logger.info(f"Using cached place: {cached_place.get('name')}")
+        return cached_place
+    
     try:
         db = get_db()
         result = db.table("places").select("*").eq("id", place_id).single().execute()
         
         if result.data:
+            cache.set(cache_key, result.data, ttl=3600)  # 1 hour
             logger.info(f"Found place: {result.data.get('name')}")
             return result.data
         

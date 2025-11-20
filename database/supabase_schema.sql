@@ -40,6 +40,8 @@ CREATE INDEX idx_places_location ON places(latitude, longitude);
 CREATE INDEX idx_places_is_active ON places(is_active);
 CREATE INDEX idx_places_source ON places(source);
 CREATE INDEX idx_places_category_source ON places(category, source);
+CREATE INDEX idx_places_active_category ON places(is_active, category) WHERE is_active = TRUE;
+CREATE INDEX idx_places_active_partial ON places(id, name, category, latitude, longitude) WHERE is_active = TRUE;
 
 -- JSONB 필드에 대한 GIN 인덱스
 CREATE INDEX idx_places_metadata_gin ON places USING GIN (metadata);
@@ -86,6 +88,8 @@ CREATE INDEX idx_quests_place_id ON quests(place_id);
 CREATE INDEX idx_quests_category ON quests(category);
 CREATE INDEX idx_quests_is_active ON quests(is_active);
 CREATE INDEX idx_quests_location ON quests(latitude, longitude);
+CREATE INDEX idx_quests_active_category ON quests(is_active, category) WHERE is_active = TRUE;
+CREATE INDEX idx_quests_active_partial ON quests(id, place_id, category, latitude, longitude) WHERE is_active = TRUE;
 
 -- Quest Quizzes Table
 CREATE TABLE IF NOT EXISTS quest_quizzes (
@@ -116,6 +120,7 @@ CREATE TABLE IF NOT EXISTS user_quests (
 CREATE INDEX idx_user_quests_user_id ON user_quests(user_id);
 CREATE INDEX idx_user_quests_quest_id ON user_quests(quest_id);
 CREATE INDEX idx_user_quests_status ON user_quests(status);
+CREATE INDEX idx_user_quests_user_status ON user_quests(user_id, status);
 
 -- User Quest Progress Table
 CREATE TABLE IF NOT EXISTS user_quest_progress (
@@ -133,6 +138,7 @@ CREATE TABLE IF NOT EXISTS user_quest_progress (
 CREATE INDEX idx_user_quest_progress_user_id ON user_quest_progress(user_id);
 CREATE INDEX idx_user_quest_progress_quest_id ON user_quest_progress(quest_id);
 CREATE INDEX idx_user_quest_progress_status ON user_quest_progress(status);
+CREATE INDEX idx_user_quest_progress_user_quest_status ON user_quest_progress(user_id, quest_id, status);
 
 -- Points Table
 CREATE TABLE IF NOT EXISTS points (
@@ -145,6 +151,7 @@ CREATE TABLE IF NOT EXISTS points (
 
 CREATE INDEX idx_points_user_id ON points(user_id);
 CREATE INDEX idx_points_created_at ON points(created_at);
+CREATE INDEX idx_points_user_created ON points(user_id, created_at DESC);
 
 -- Rewards Table
 CREATE TABLE IF NOT EXISTS rewards (
@@ -161,6 +168,7 @@ CREATE TABLE IF NOT EXISTS rewards (
 
 CREATE INDEX idx_rewards_type ON rewards(type);
 CREATE INDEX idx_rewards_is_active ON rewards(is_active);
+CREATE INDEX idx_rewards_active_type ON rewards(is_active, type, point_cost) WHERE is_active = TRUE;
 
 -- User Rewards Table
 CREATE TABLE IF NOT EXISTS user_rewards (
@@ -174,6 +182,7 @@ CREATE TABLE IF NOT EXISTS user_rewards (
 
 CREATE INDEX idx_user_rewards_user_id ON user_rewards(user_id);
 CREATE INDEX idx_user_rewards_reward_id ON user_rewards(reward_id);
+CREATE INDEX idx_user_rewards_user_claimed ON user_rewards(user_id, claimed_at DESC);
 
 -- Chat Logs Table
 CREATE TABLE IF NOT EXISTS chat_logs (
@@ -188,6 +197,7 @@ CREATE TABLE IF NOT EXISTS chat_logs (
 CREATE INDEX idx_chat_logs_user_id ON chat_logs(user_id);
 CREATE INDEX idx_chat_logs_landmark ON chat_logs(landmark);
 CREATE INDEX idx_chat_logs_created_at ON chat_logs(created_at);
+CREATE INDEX idx_chat_logs_user_created ON chat_logs(user_id, created_at DESC);
 
 -- VLM Logs Table
 CREATE TABLE IF NOT EXISTS vlm_logs (
@@ -214,6 +224,8 @@ CREATE INDEX idx_vlm_logs_image_hash ON vlm_logs(image_hash);
 CREATE INDEX idx_vlm_logs_created_at ON vlm_logs(created_at);
 CREATE INDEX idx_vlm_logs_location ON vlm_logs(latitude, longitude);
 CREATE INDEX idx_vlm_logs_pinecone_id ON vlm_logs(pinecone_vector_id);
+CREATE INDEX idx_vlm_logs_user_created ON vlm_logs(user_id, created_at DESC);
+CREATE INDEX idx_vlm_logs_hash_created ON vlm_logs(image_hash, created_at DESC) WHERE error_message IS NULL;
 
 -- Functions
 
@@ -231,7 +243,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Search places by radius (Haversine formula)
+-- Search places by radius (Haversine formula with bounding box)
 DROP FUNCTION IF EXISTS search_places_by_radius(DECIMAL, DECIMAL, FLOAT, INTEGER);
 CREATE OR REPLACE FUNCTION search_places_by_radius(
     lat DECIMAL(10, 8),
@@ -248,33 +260,52 @@ RETURNS TABLE (
     longitude DECIMAL(11, 8),
     distance_km FLOAT
 ) AS $$
+DECLARE
+    -- Approximate bounding box (1 degree ≈ 111km)
+    lat_offset DECIMAL := radius_km / 111.0;
+    lon_offset DECIMAL := radius_km / (111.0 * COS(RADIANS(lat)));
 BEGIN
     RETURN QUERY
+    WITH nearby_candidates AS (
+        SELECT
+            p.id,
+            p.name,
+            p.category,
+            p.address,
+            p.latitude,
+            p.longitude,
+            (
+                6371 * ACOS(
+                    GREATEST(-1.0, LEAST(1.0,
+                        COS(RADIANS(lat)) *
+                        COS(RADIANS(p.latitude)) *
+                        COS(RADIANS(p.longitude) - RADIANS(lon)) +
+                        SIN(RADIANS(lat)) *
+                        SIN(RADIANS(p.latitude))
+                    ))
+                )
+            )::FLOAT AS distance_km
+        FROM places p
+        WHERE p.is_active = TRUE
+            AND p.latitude BETWEEN (lat - lat_offset) AND (lat + lat_offset)
+            AND p.longitude BETWEEN (lon - lon_offset) AND (lon + lon_offset)
+    )
     SELECT
-        p.id,
-        p.name,
-        p.category,
-        p.address,
-        p.latitude,
-        p.longitude,
-        (
-            6371 * ACOS(
-                COS(RADIANS(lat)) *
-                COS(RADIANS(p.latitude)) *
-                COS(RADIANS(p.longitude) - RADIANS(lon)) +
-                SIN(RADIANS(lat)) *
-                SIN(RADIANS(p.latitude))
-            )
-        )::FLOAT AS distance_km
-    FROM places p
-    WHERE p.is_active = TRUE
-    HAVING distance_km <= radius_km
-    ORDER BY distance_km
+        nc.id,
+        nc.name,
+        nc.category,
+        nc.address,
+        nc.latitude,
+        nc.longitude,
+        nc.distance_km
+    FROM nearby_candidates nc
+    WHERE nc.distance_km <= radius_km
+    ORDER BY nc.distance_km
     LIMIT limit_count;
 END;
 $$ LANGUAGE plpgsql;
 
--- Search nearby quests
+-- Search nearby quests (with bounding box)
 DROP FUNCTION IF EXISTS search_nearby_quests(DECIMAL, DECIMAL, FLOAT, INTEGER);
 CREATE OR REPLACE FUNCTION search_nearby_quests(
     lat DECIMAL(10, 8),
@@ -290,29 +321,46 @@ RETURNS TABLE (
     quest_id INTEGER,
     quest_points INTEGER
 ) AS $$
+DECLARE
+    lat_offset DECIMAL := radius_km / 111.0;
+    lon_offset DECIMAL := radius_km / (111.0 * COS(RADIANS(lat)));
 BEGIN
     RETURN QUERY
+    WITH nearby_candidates AS (
+        SELECT
+            p.id AS place_id,
+            p.name AS place_name,
+            p.category,
+            (
+                6371 * ACOS(
+                    GREATEST(-1.0, LEAST(1.0,
+                        COS(RADIANS(lat)) *
+                        COS(RADIANS(p.latitude)) *
+                        COS(RADIANS(p.longitude) - RADIANS(lon)) +
+                        SIN(RADIANS(lat)) *
+                        SIN(RADIANS(p.latitude))
+                    ))
+                )
+            )::FLOAT AS distance_km,
+            q.id AS quest_id,
+            q.points AS quest_points
+        FROM places p
+        INNER JOIN quests q ON p.id = q.place_id
+        WHERE q.is_active = TRUE
+            AND p.is_active = TRUE
+            AND p.latitude BETWEEN (lat - lat_offset) AND (lat + lat_offset)
+            AND p.longitude BETWEEN (lon - lon_offset) AND (lon + lon_offset)
+    )
     SELECT
-        p.id AS place_id,
-        p.name AS place_name,
-        p.category,
-        (
-            6371 * ACOS(
-                COS(RADIANS(lat)) *
-                COS(RADIANS(p.latitude)) *
-                COS(RADIANS(p.longitude) - RADIANS(lon)) +
-                SIN(RADIANS(lat)) *
-                SIN(RADIANS(p.latitude))
-            )
-        )::FLOAT AS distance_km,
-        q.id AS quest_id,
-        q.points AS quest_points
-    FROM places p
-    INNER JOIN quests q ON p.id = q.place_id
-    WHERE q.is_active = TRUE
-        AND p.is_active = TRUE
-    HAVING distance_km <= radius_km
-    ORDER BY distance_km
+        nc.place_id,
+        nc.place_name,
+        nc.category,
+        nc.distance_km,
+        nc.quest_id,
+        nc.quest_points
+    FROM nearby_candidates nc
+    WHERE nc.distance_km <= radius_km
+    ORDER BY nc.distance_km
     LIMIT limit_count;
 END;
 $$ LANGUAGE plpgsql;
@@ -352,9 +400,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Get cached VLM result by image hash
-DROP FUNCTION IF EXISTS get_cached_vlm_result(VARCHAR);
-CREATE OR REPLACE FUNCTION get_cached_vlm_result(hash VARCHAR(64))
+-- Get cached VLM result by image hash (with max_age parameter)
+DROP FUNCTION IF EXISTS get_cached_vlm_result(VARCHAR, INTEGER);
+CREATE OR REPLACE FUNCTION get_cached_vlm_result(
+    hash VARCHAR(64),
+    max_age_hours INTEGER DEFAULT 24
+)
 RETURNS TABLE (
     id UUID,
     user_id UUID,
@@ -372,6 +423,8 @@ RETURNS TABLE (
     pinecone_vector_id VARCHAR(255),
     created_at TIMESTAMP
 ) AS $$
+DECLARE
+    cutoff_time TIMESTAMP := CURRENT_TIMESTAMP - (max_age_hours || ' hours')::INTERVAL;
 BEGIN
     RETURN QUERY
     SELECT
@@ -394,6 +447,7 @@ BEGIN
     LEFT JOIN places p ON v.matched_place_id = p.id
     WHERE v.image_hash = hash
         AND v.error_message IS NULL
+        AND v.created_at >= cutoff_time
     ORDER BY v.created_at DESC
     LIMIT 1;
 END;
@@ -522,6 +576,54 @@ COMMENT ON COLUMN places.source IS '데이터 출처: manual(수동입력), tour
 COMMENT ON COLUMN places.metadata IS '상세 메타데이터 (JSONB): tour_api, visit_seoul, rag_text 등 포함';
 COMMENT ON COLUMN places.images IS '이미지 URL 배열 (JSONB)';
 
+-- Get places with quests by category
+DROP FUNCTION IF EXISTS get_places_with_quests(VARCHAR, INTEGER);
+CREATE OR REPLACE FUNCTION get_places_with_quests(
+    category_filter VARCHAR(50) DEFAULT NULL,
+    limit_count INTEGER DEFAULT 20
+)
+RETURNS TABLE (
+    id UUID,
+    name VARCHAR(255),
+    category VARCHAR(50),
+    description TEXT,
+    address VARCHAR(500),
+    latitude DECIMAL(10, 8),
+    longitude DECIMAL(11, 8),
+    image_url TEXT,
+    quest_id INTEGER,
+    quest_name VARCHAR(255)
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT DISTINCT ON (p.id)
+        p.id,
+        p.name,
+        p.category,
+        p.description,
+        p.address,
+        p.latitude,
+        p.longitude,
+        p.image_url,
+        q.id AS quest_id,
+        q.name AS quest_name
+    FROM places p
+    INNER JOIN quests q ON p.id = q.place_id
+    WHERE p.is_active = TRUE
+        AND q.is_active = TRUE
+        AND (category_filter IS NULL OR p.category = category_filter)
+    ORDER BY p.id, q.created_at DESC
+    LIMIT limit_count;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Update table statistics for query optimization
 ANALYZE places;
 ANALYZE quests;
+ANALYZE chat_logs;
+ANALYZE vlm_logs;
+ANALYZE points;
+ANALYZE user_quests;
+ANALYZE user_quest_progress;
+ANALYZE user_rewards;
+ANALYZE rewards;

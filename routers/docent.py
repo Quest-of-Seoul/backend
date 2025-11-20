@@ -35,7 +35,7 @@ async def chat_with_docent(request: DocentRequest):
     try:
         logger.info(f"Docent chat: {request.landmark} (TTS: {request.enable_tts})")
 
-        ai_response = generate_docent_message(
+        ai_response = await generate_docent_message(
             landmark=request.landmark,
             user_message=request.user_message,
             language=request.language
@@ -49,13 +49,13 @@ async def chat_with_docent(request: DocentRequest):
                 language_code = f"{request.language}-KR" if request.language == "ko" else "en-US"
 
                 if request.prefer_url:
-                    audio_url, audio_base64 = text_to_speech_url(
+                    audio_url, audio_base64 = await text_to_speech_url(
                         text=ai_response,
                         language_code=language_code,
                         upload_to_storage=True
                     )
                 else:
-                    audio_base64 = text_to_speech(
+                    audio_base64 = await text_to_speech(
                         text=ai_response,
                         language_code=language_code
                     )
@@ -96,7 +96,7 @@ async def get_quiz(landmark: str, language: str = "ko"):
     """Generate quiz question about landmark"""
     try:
         logger.info(f"Quiz generation: {landmark}")
-        quiz = generate_quiz(landmark, language)
+        quiz = await generate_quiz(landmark, language)
         return quiz
     except Exception as e:
         logger.error(f"Quiz error: {e}", exc_info=True)
@@ -113,7 +113,7 @@ async def generate_tts(request: TTSRequest):
         audio_base64 = None
 
         if request.prefer_url:
-            audio_url, audio_base64 = text_to_speech_url(
+            audio_url, audio_base64 = await text_to_speech_url(
                 text=request.text,
                 language_code=request.language_code,
                 upload_to_storage=True
@@ -128,7 +128,7 @@ async def generate_tts(request: TTSRequest):
                 "text": request.text
             }
         else:
-            audio_base64 = text_to_speech(
+            audio_base64 = await text_to_speech(
                 text=request.text,
                 language_code=request.language_code
             )
@@ -188,7 +188,7 @@ async def websocket_tts(websocket: WebSocket):
             await websocket.close()
             return
 
-        audio_bytes = text_to_speech_bytes(
+        audio_bytes = await text_to_speech_bytes(
             text=text,
             language_code=language_code
         )
@@ -246,7 +246,7 @@ async def websocket_chat(websocket: WebSocket):
 
         logger.info(f"Chat WS: {landmark} (TTS: {enable_tts})")
 
-        ai_response = generate_docent_message(
+        ai_response = await generate_docent_message(
             landmark=landmark,
             user_message=user_message,
             language=language
@@ -273,7 +273,7 @@ async def websocket_chat(websocket: WebSocket):
 
         if enable_tts:
             language_code = f"{language}-KR" if language == "ko" else "en-US"
-            audio_bytes = text_to_speech_bytes(
+            audio_bytes = await text_to_speech_bytes(
                 text=ai_response,
                 language_code=language_code
             )
