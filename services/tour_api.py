@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
 
-TOUR_API_BASE_URL = "http://apis.data.go.kr/B551011/KorService1"
+TOUR_API_BASE_URL = "http://apis.data.go.kr/B551011/KorService2"
 
 CONTENT_TYPE_MAP = {
     "Attraction": "12",  # 관광지
@@ -71,13 +71,13 @@ def search_places_by_category(
         "MobileOS": "ETC",
         "MobileApp": "QuestOfSeoul",
         "_type": "json",
-        "listYN": "Y",
+        #"listYN": "Y",
         "arrange": "A",  # 제목순 정렬
         "contentTypeId": content_type_id,
         "areaCode": area_code
     }
     
-    url = f"{TOUR_API_BASE_URL}/areaBasedList1"
+    url = f"{TOUR_API_BASE_URL}/areaBasedList2"
     
     for attempt in range(retry_count):
         try:
@@ -145,10 +145,10 @@ def get_place_detail(
         "MobileApp": "QuestOfSeoul",
         "_type": "json",
         "contentId": content_id,
-        "contentTypeId": content_type_id
+        #"contentTypeId": content_type_id
     }
     
-    url = f"{TOUR_API_BASE_URL}/detailCommon1"
+    url = f"{TOUR_API_BASE_URL}/detailCommon2"
     
     for attempt in range(retry_count):
         try:
@@ -222,7 +222,7 @@ def get_place_intro(
         "contentTypeId": content_type_id
     }
     
-    url = f"{TOUR_API_BASE_URL}/detailIntro1"
+    url = f"{TOUR_API_BASE_URL}/detailIntro2"
     
     for attempt in range(retry_count):
         try:
