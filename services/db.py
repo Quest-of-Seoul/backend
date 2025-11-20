@@ -207,3 +207,122 @@ def increment_place_view_count(place_id: str) -> bool:
         return False
 
 
+def save_place(place_data: Dict) -> Optional[str]:
+    """
+    장소 데이터를 DB에 저장
+    
+    Args:
+        place_data: 저장할 장소 데이터 딕셔너리
+    
+    Returns:
+        저장된 place_id 또는 None
+    """
+    try:
+        db = get_db()
+        
+        # 필수 필드 검증
+        if not place_data.get("name"):
+            logger.error("Place name is required")
+            return None
+        
+        if not place_data.get("latitude") or not place_data.get("longitude"):
+            logger.error("Place coordinates are required")
+            return None
+        
+        # 중복 체크 (이름과 좌표로)
+        existing = db.table("places") \
+            .select("id") \
+            .ilike("name", place_data["name"]) \
+            .eq("latitude", place_data["latitude"]) \
+            .eq("longitude", place_data["longitude"]) \
+            .limit(1) \
+            .execute()
+        
+        if existing.data and len(existing.data) > 0:
+            place_id = existing.data[0]["id"]
+            logger.info(f"Place already exists: {place_id} ({place_data['name']})")
+            
+            # 업데이트
+            db.table("places").update(place_data).eq("id", place_id).execute()
+            return place_id
+        
+        # 새로 생성
+        result = db.table("places").insert(place_data).execute()
+        
+        if result.data and len(result.data) > 0:
+            place_id = result.data[0].get("id")
+            logger.info(f"Place saved: {place_id} ({place_data['name']})")
+            return place_id
+        
+        return None
+    
+    except Exception as e:
+        logger.error(f"Error saving place: {e}", exc_info=True)
+        return None
+
+
+def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) -> Optional[int]:
+    """
+    장소로부터 퀘스트 생성
+    
+    Args:
+        place_id: 장소 ID
+        quest_data: 추가 퀘스트 데이터 (선택)
+    
+    Returns:
+        생성된 quest_id 또는 None
+    """
+    try:
+        db = get_db()
+        
+        # 장소 정보 가져오기
+        place = get_place_by_id(place_id)
+        if not place:
+            logger.error(f"Place not found: {place_id}")
+            return None
+        
+        # 퀘스트 데이터 준비
+        quest_insert = {
+            "place_id": place_id,
+            "name": place.get("name"),
+            "title": place.get("name"),
+            "description": place.get("description"),
+            "category": place.get("category"),
+            "latitude": float(place.get("latitude")),
+            "longitude": float(place.get("longitude")),
+            "reward_point": 100,
+            "points": 10,
+            "difficulty": "easy",
+            "is_active": True
+        }
+        
+        # 추가 데이터 병합
+        if quest_data:
+            quest_insert.update(quest_data)
+        
+        # 중복 체크
+        existing = db.table("quests") \
+            .select("id") \
+            .eq("place_id", place_id) \
+            .limit(1) \
+            .execute()
+        
+        if existing.data and len(existing.data) > 0:
+            quest_id = existing.data[0]["id"]
+            logger.info(f"Quest already exists for place: {place_id} (quest_id: {quest_id})")
+            return quest_id
+        
+        # 새로 생성
+        result = db.table("quests").insert(quest_insert).execute()
+        
+        if result.data and len(result.data) > 0:
+            quest_id = result.data[0].get("id")
+            logger.info(f"Quest created: {quest_id} for place: {place_id}")
+            return quest_id
+        
+        return None
+    
+    except Exception as e:
+        logger.error(f"Error creating quest: {e}", exc_info=True)
+        return None
+
