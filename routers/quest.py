@@ -45,7 +45,7 @@ async def get_all_quests():
     try:
         db = get_db()
         # Join with places table to get category and other place info
-        result = db.table("quests").select("*, places(category, district, name, image_url, images)").execute()
+        result = db.table("quests").select("*, places(category, district, name, address, image_url, images)").execute()
 
         # Post-process to merge place data into quest data
         quests = []
@@ -70,6 +70,9 @@ async def get_all_quests():
                     quest_data["category"] = place["category"]
                 if not quest_data.get("district") and place.get("district"):
                     quest_data["district"] = place["district"]
+                # Add place address if available
+                if place.get("address"):
+                    quest_data["address"] = place["address"]
                 # Add place image info if available
                 if place.get("image_url"):
                     quest_data["place_image_url"] = place["image_url"]
