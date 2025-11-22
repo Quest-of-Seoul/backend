@@ -78,9 +78,8 @@ class PineconeSchemaManager:
                 sample_places = [
                     {
                         "place_id": "place-001-gyeongbokgung",
-                        "place_name": "경복궁",
-                        "name_en": "Gyeongbokgung Palace",
-                        "category": "역사유적",
+                        "place_name": "Gyeongbokgung Palace",
+                        "category": "Historic Site",
                         "image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
                         "latitude": 37.579617,
                         "longitude": 126.977041,
@@ -88,9 +87,8 @@ class PineconeSchemaManager:
                     },
                     {
                         "place_id": "place-002-namsan-tower",
-                        "place_name": "남산서울타워",
-                        "name_en": "N Seoul Tower",
-                        "category": "관광지",
+                        "place_name": "N Seoul Tower",
+                        "category": "Attraction",
                         "image_url": "https://ak-d.tripcdn.com/images/100v0z000000nkadwE2AA_C_1200_800_Q70.webp",
                         "latitude": 37.551169,
                         "longitude": 126.988227,
@@ -98,9 +96,8 @@ class PineconeSchemaManager:
                     },
                     {
                         "place_id": "place-003-gwanghwamun",
-                        "place_name": "광화문광장",
-                        "name_en": "Gwanghwamun Square",
-                        "category": "광장",
+                        "place_name": "Gwanghwamun Square",
+                        "category": "Square",
                         "image_url": "https://ak-d.tripcdn.com/images/01051120008c32dlbE44A.webp",
                         "latitude": 37.572889,
                         "longitude": 126.976849,
@@ -108,9 +105,8 @@ class PineconeSchemaManager:
                     },
                     {
                         "place_id": "place-004-myeongdong-cathedral",
-                        "place_name": "명동성당",
-                        "name_en": "Myeongdong Cathedral",
-                        "category": "종교시설",
+                        "place_name": "Myeongdong Cathedral",
+                        "category": "Religious Site",
                         "image_url": "https://ak-d.tripcdn.com/images/100f1f000001gqchv1B53.webp",
                         "latitude": 37.563600,
                         "longitude": 126.986870,
@@ -118,9 +114,8 @@ class PineconeSchemaManager:
                     },
                     {
                         "place_id": "place-005-bukchon-hanok",
-                        "place_name": "북촌한옥마을",
-                        "name_en": "Bukchon Hanok Village",
-                        "category": "문화마을",
+                        "place_name": "Bukchon Hanok Village",
+                        "category": "Cultural Village",
                         "image_url": "https://ak-d.tripcdn.com/images/100p11000000r4rhv9EF4.jpg",
                         "latitude": 37.582306,
                         "longitude": 126.985302,
@@ -143,7 +138,6 @@ class PineconeSchemaManager:
                     metadata = {
                         "place_id": place["place_id"],
                         "place_name": place["place_name"],
-                        "name_en": place.get("name_en", ""),
                         "category": place["category"],
                         "image_url": place["image_url"],
                         "image_hash": image_hash,

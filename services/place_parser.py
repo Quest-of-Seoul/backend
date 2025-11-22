@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 def clean_html(text: Optional[str]) -> str:
     """
-    HTML 태그 제거 및 정리
+    HTML 태그 제거 및 정리 (간단한 HTML 태그만 제거)
     
     Args:
         text: 원본 텍스트
@@ -21,20 +21,27 @@ def clean_html(text: Optional[str]) -> str:
     if not text:
         return ""
     
+    # HTML 태그 제거
     text = re.sub(r'<[^>]+>', '', text)
+    
+    # HTML 엔티티 디코딩
     text = unescape(text)
-    text = re.sub(r'\s+', ' ', text)    
+    
+    # 연속된 공백 정리
+    text = re.sub(r'\s+', ' ', text)
+    
+    # 앞뒤 공백 제거
     text = text.strip()
+    
     return text
 
 
-def parse_rag_text(tour_data: Dict, visit_seoul_data: Optional[Dict] = None) -> str:
+def parse_rag_text(visit_seoul_data: Dict) -> str:
     """
     RAG용 통합 텍스트 생성
     
     Args:
-        tour_data: TourAPI 데이터
-        visit_seoul_data: VISIT SEOUL API 데이터 (선택)
+        visit_seoul_data: VISIT SEOUL API 데이터
     
     Returns:
         RAG용 텍스트
@@ -42,98 +49,63 @@ def parse_rag_text(tour_data: Dict, visit_seoul_data: Optional[Dict] = None) -> 
     parts = []
     
     # 장소명
-    name = tour_data.get("name") or ""
-    name_en = tour_data.get("name_en") or ""
+    name = visit_seoul_data.get("name") or ""
     if name:
-        if name_en:
-            parts.append(f"[{name}] ({name_en})")
-        else:
-            parts.append(f"[{name}]")
+        parts.append(f"[{name}]")
     
-    # 카테고리
-    category = tour_data.get("category") or ""
+    # 카테고리 (RAG 텍스트에는 com_ctgry_sn 사용 가능, 하지만 실제 DB 저장 시에는 우리 카테고리명 사용)
+    category = visit_seoul_data.get("category") or ""
     if category:
         parts.append(f"[카테고리] {category}")
     
     parts.append("")  # 빈 줄
     
-    # 개요 (TourAPI)
-    overview = clean_html(tour_data.get("overview") or "")
-    if overview:
-        parts.append("[개요]")
-        parts.append(overview)
+    # VISIT SEOUL 내용 (content 또는 overview) - post_desc 그대로 사용
+    content = visit_seoul_data.get("content") or visit_seoul_data.get("overview") or ""
+    if content:
+        parts.append("[내용]")
+        parts.append(content)
         parts.append("")
     
-    # 상세정보 (TourAPI)
-    detail_info = clean_html(tour_data.get("detail_info") or "")
-    if detail_info:
-        parts.append("[상세정보]")
-        parts.append(detail_info)
-        parts.append("")
+    # 이용시간
+    vs_detail = visit_seoul_data.get("detail_info") or {}
+    opening_hours = vs_detail.get("opening_hours") or ""
+    if opening_hours:
+        parts.append(f"[이용시간] {opening_hours}")
     
-    # 이용안내 (TourAPI)
-    usage_info = tour_data.get("usage_info") or ""
-    if usage_info:
-        parts.append("[이용안내]")
-        parts.append(usage_info)
-        parts.append("")
+    # 휴무일
+    closed_days = vs_detail.get("closed_days") or ""
+    if closed_days:
+        parts.append(f"[휴무일] {closed_days}")
     
-    # VISIT SEOUL 내용
-    if visit_seoul_data:
-        vs_content = clean_html(visit_seoul_data.get("content") or "")
-        if vs_content:
-            parts.append("[VISIT SEOUL 내용]")
-            parts.append(vs_content)
-            parts.append("")
-        
-        # 이용시간
-        vs_detail = visit_seoul_data.get("detail_info") or {}
-        opening_hours = vs_detail.get("opening_hours") or ""
-        if opening_hours:
-            parts.append(f"[이용시간] {opening_hours}")
-        
-        # 휴무일
-        closed_days = vs_detail.get("closed_days") or ""
-        if closed_days:
-            parts.append(f"[휴무일] {closed_days}")
-        
-        # 영업일
-        business_days = vs_detail.get("business_days") or ""
-        if business_days:
-            parts.append(f"[영업일] {business_days}")
-        
-        parts.append("")
+    # 영업일
+    business_days = vs_detail.get("business_days") or ""
+    if business_days:
+        parts.append(f"[영업일] {business_days}")
     
-    # 입장료
-    admission_fee = tour_data.get("admission_fee") or ""
-    if admission_fee:
-        parts.append(f"[입장료] {admission_fee}")
+    parts.append("")
     
     # 전화번호
-    tel = tour_data.get("tel") or ""
-    if visit_seoul_data and visit_seoul_data.get("detail_info"):
-        tel = visit_seoul_data["detail_info"].get("tel") or tel
+    tel = ""
+    if visit_seoul_data.get("detail_info"):
+        tel = visit_seoul_data["detail_info"].get("tel") or ""
     if tel:
         parts.append(f"[전화번호] {tel}")
     
     # 주소
-    address = tour_data.get("address") or ""
-    if visit_seoul_data and visit_seoul_data.get("detail_info"):
-        address = visit_seoul_data["detail_info"].get("address") or address
+    address = visit_seoul_data.get("address") or ""
     if address:
         parts.append(f"[주소] {address}")
     
     # 교통정보
     traffic_info = ""
-    if visit_seoul_data and visit_seoul_data.get("detail_info"):
+    if visit_seoul_data.get("detail_info"):
         traffic_info = visit_seoul_data["detail_info"].get("traffic_info") or ""
     if traffic_info:
         parts.append(f"[교통정보] {traffic_info}")
     
     # 팁
-    tip = ""
-    if visit_seoul_data:
-        tip = visit_seoul_data.get("tip") or ""
+    tip = visit_seoul_data.get("tip") or ""
     if tip:
         parts.append("[팁]")
         parts.append(tip)
@@ -150,105 +122,65 @@ def parse_rag_text(tour_data: Dict, visit_seoul_data: Optional[Dict] = None) -> 
     return rag_text
 
 
-def merge_place_data(tour_data: Dict, visit_seoul_data: Optional[Dict] = None) -> Dict:
+def merge_place_data(tour_data: Optional[Dict], visit_seoul_data: Dict, category: Optional[str] = None) -> Dict:
     """
-    TourAPI와 VISIT SEOUL API 데이터 통합
+    VISIT SEOUL API 데이터를 장소 데이터로 변환
     
     Args:
-        tour_data: TourAPI 데이터
-        visit_seoul_data: VISIT SEOUL API 데이터 (선택)
+        tour_data: TourAPI 데이터 (사용하지 않음, 호환성을 위해 유지)
+        visit_seoul_data: VISIT SEOUL API 데이터
+        category: 우리가 정의한 카테고리명 (Attractions, History, Culture 등)
     
     Returns:
         통합된 장소 데이터 (DB 저장용)
     """
-    # 기본 정보 (TourAPI 우선)
-    name = tour_data.get("name") or ""
-    name_en = tour_data.get("name_en") or ""
-    category = tour_data.get("category") or ""
-    address = tour_data.get("address") or ""
-    latitude = tour_data.get("latitude")
-    longitude = tour_data.get("longitude")
-    image_url = tour_data.get("image_url") or ""
-    images = tour_data.get("images") or []
+    # VISIT SEOUL 데이터 사용
+    name = visit_seoul_data.get("name") or ""
+    # category는 파라미터로 전달받은 것을 사용, 없으면 visit_seoul_data에서 가져옴
+    final_category = category or visit_seoul_data.get("category") or ""
+    address = visit_seoul_data.get("address") or ""
+    latitude = visit_seoul_data.get("latitude")
+    longitude = visit_seoul_data.get("longitude")
+    image_url = visit_seoul_data.get("image_url") or ""
+    images = visit_seoul_data.get("images") or []
     
-    # VISIT SEOUL 데이터로 보완
-    if visit_seoul_data:
-        # 이름 보완
-        if not name_en and visit_seoul_data.get("name_en"):
-            name_en = visit_seoul_data["name_en"]
-        
-        # 주소 보완
-        if not address and visit_seoul_data.get("address"):
-            address = visit_seoul_data["address"]
-        
-        # 좌표 보완
-        if not latitude and visit_seoul_data.get("latitude"):
-            latitude = visit_seoul_data["latitude"]
-        if not longitude and visit_seoul_data.get("longitude"):
-            longitude = visit_seoul_data["longitude"]
-        
-        # 이미지 보완
-        if not image_url and visit_seoul_data.get("image_url"):
-            image_url = visit_seoul_data["image_url"]
-        if visit_seoul_data.get("images"):
-            images.extend([img for img in visit_seoul_data["images"] if img not in images])
-    
-    # description 생성 (개요 + VISIT SEOUL 내용)
-    description_parts = []
-    if tour_data.get("overview"):
-        description_parts.append(clean_html(tour_data["overview"]))
-    if visit_seoul_data and visit_seoul_data.get("content"):
-        vs_content = clean_html(visit_seoul_data["content"])
-        if vs_content and vs_content not in description_parts:
-            description_parts.append(vs_content)
-    description = "\n\n".join(description_parts) if description_parts else None
+    # description 생성 (post_desc 그대로 사용)
+    description = visit_seoul_data.get("content") or visit_seoul_data.get("overview")
+    if description:
+        logger.debug(f"Description from post_desc, length: {len(description)}")
     
     # metadata 생성
+    # content가 없으면 overview 사용
+    content_for_metadata = visit_seoul_data.get("content") or visit_seoul_data.get("overview") or ""
     metadata = {
-        "tour_api": {
-            "content_id": tour_data.get("content_id"),
-            "content_type_id": tour_data.get("content_type_id"),
-            "overview": clean_html(tour_data.get("overview") or ""),
-            "detail_info": clean_html(tour_data.get("detail_info") or ""),
-            "usage_info": tour_data.get("usage_info") or "",
-            "homepage": tour_data.get("homepage") or "",
-            "tel": tour_data.get("tel") or ""
+        "visit_seoul": {
+            "content_id": visit_seoul_data.get("content_id"),
+            "content": content_for_metadata,  # post_desc 그대로 사용
+            "detail_info": visit_seoul_data.get("detail_info") or {},
+            "tip": visit_seoul_data.get("tip") or "",
+            "com_ctgry_sn": category  # com_ctgry_sn 추가
         }
     }
     
-    if visit_seoul_data:
-        metadata["visit_seoul"] = {
-            "content_id": visit_seoul_data.get("content_id"),
-            "content": clean_html(visit_seoul_data.get("content") or ""),
-            "detail_info": visit_seoul_data.get("detail_info") or {},
-            "tip": visit_seoul_data.get("tip") or ""
-        }
-    
     # 통합 정보
-    metadata["rag_text"] = parse_rag_text(tour_data, visit_seoul_data)
+    metadata["rag_text"] = parse_rag_text(visit_seoul_data)
     
     # 통합 이용정보
-    if visit_seoul_data and visit_seoul_data.get("detail_info"):
+    if visit_seoul_data.get("detail_info"):
         vs_detail = visit_seoul_data["detail_info"]
         metadata["opening_hours"] = vs_detail.get("opening_hours") or ""
         metadata["closed_days"] = vs_detail.get("closed_days") or ""
-        metadata["phone"] = vs_detail.get("tel") or tour_data.get("tel") or ""
+        metadata["phone"] = vs_detail.get("tel") or ""
         metadata["traffic_info"] = vs_detail.get("traffic_info") or ""
         metadata["tip"] = visit_seoul_data.get("tip") or ""
-    else:
-        metadata["phone"] = tour_data.get("tel") or ""
-    
-    metadata["homepage"] = tour_data.get("homepage") or ""
-    metadata["admission_fee"] = tour_data.get("admission_fee") or ""
     
     # source 결정
-    source = "both" if visit_seoul_data else "tour_api"
+    source = "visit_seoul"
     
     place_data = {
         "name": name,
-        "name_en": name_en if name_en else None,
         "description": description,
-        "category": category,
+        "category": final_category,  # 우리가 정의한 카테고리명 사용
         "address": address if address else None,
         "latitude": float(latitude) if latitude else None,
         "longitude": float(longitude) if longitude else None,

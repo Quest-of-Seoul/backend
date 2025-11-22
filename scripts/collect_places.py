@@ -9,19 +9,12 @@ from typing import List, Dict, Optional
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from services.tour_api import (
-    collect_all_places_by_category as collect_tour_places,
-    get_place_detail as get_tour_detail,
-    get_place_intro as get_tour_intro,
-    parse_tour_api_place,
-    get_content_type_id
-)
 from services.visit_seoul_api import (
     collect_all_places_by_category as collect_visit_seoul_places,
     get_place_detail as get_visit_seoul_detail,
-    parse_visit_seoul_place
+    parse_visit_seoul_place,
+    map_category_to_visit_seoul_sn
 )
-from services.place_matcher import find_best_matches, match_places
 from services.place_parser import merge_place_data
 from services.db import save_place, create_quest_from_place
 from services.image_utils import download_image, hash_image
@@ -80,11 +73,10 @@ def create_image_embedding_for_place(place_id: str, image_url: str) -> bool:
         metadata = {
             "place_id": place_id,
             "place_name": place.get("name", ""),
-            "name_en": place.get("name_en", ""),
             "category": place.get("category", ""),
             "image_url": image_url,
             "image_hash": image_hash,
-            "source": place.get("source", "tour_api"),
+            "source": place.get("source", "visit_seoul"),
             "latitude": float(place.get("latitude", 0)) if place.get("latitude") else None,
             "longitude": float(place.get("longitude", 0)) if place.get("longitude") else None
         }
@@ -125,9 +117,7 @@ def collect_category_places(
     
     stats = {
         "category": category,
-        "tour_places_collected": 0,
         "visit_seoul_places_collected": 0,
-        "places_matched": 0,
         "places_saved": 0,
         "quests_created": 0,
         "embeddings_created": 0,
@@ -135,71 +125,43 @@ def collect_category_places(
     }
     
     try:
-        logger.info(f"Step 1: Collecting TourAPI places for {category}...")
-        tour_items = collect_tour_places(
-            category=category,
-            area_code=area_code,
-            max_places=max_places,
-            delay_between_pages=delay_between_api_calls
-        )
-        stats["tour_places_collected"] = len(tour_items)
-        logger.info(f"Collected {len(tour_items)} TourAPI places")
+        logger.info(f"Step 1: Collecting VISIT SEOUL places for {category}...")
+        # 카테고리를 VISIT SEOUL category_sn 리스트로 매핑
+        from services.visit_seoul_api import map_category_to_visit_seoul_sn
+        visit_seoul_category_sns = map_category_to_visit_seoul_sn(category)
         
-        if not tour_items:
-            logger.warning(f"No TourAPI places found for category: {category}")
-            return stats
-        
-        logger.info("Step 2: Fetching TourAPI place details...")
-        tour_places = []
-        for idx, item in enumerate(tour_items):
-            try:
-                content_id = item.get("contentid")
-                content_type_id = item.get("contenttypeid")
-                
-                if not content_id or not content_type_id:
-                    logger.warning(f"Skipping item {idx + 1}: missing contentId or contentTypeId")
-                    continue
-                
-                # 상세 정보 조회
-                detail = get_tour_detail(content_id, content_type_id)
-                time.sleep(delay_between_api_calls)
-                
-                # 소개 정보 조회
-                intro = get_tour_intro(content_id, content_type_id)
-                time.sleep(delay_between_api_calls)
-                
-                # 파싱
-                tour_place = parse_tour_api_place(item, detail, intro)
-                tour_place["category"] = category  # 카테고리 설정
-                tour_places.append(tour_place)
-                
-                logger.info(f"Processed {idx + 1}/{len(tour_items)}: {tour_place.get('name')}")
-                
-            except Exception as e:
-                error_msg = f"Error processing TourAPI item {idx + 1}: {e}"
-                logger.error(error_msg, exc_info=True)
-                stats["errors"].append(error_msg)
-        
-        logger.info(f"Processed {len(tour_places)} TourAPI places with details")
-        
-        logger.info(f"Step 3: Collecting VISIT SEOUL places for {category}...")
-        visit_seoul_items = collect_visit_seoul_places(
-            category=category,
-            lang="ko",
-            max_places=max_places * 2,  # 매칭을 위해 더 많이 수집
-            delay_between_pages=delay_between_api_calls
-        )
+        visit_seoul_items = []
+        if visit_seoul_category_sns:
+            logger.info(f"Mapped category '{category}' to {len(visit_seoul_category_sns)} VISIT SEOUL category_sn(s): {visit_seoul_category_sns}")
+            # 각 category_sn에 대해 장소 수집
+            for category_sn in visit_seoul_category_sns:
+                items = collect_visit_seoul_places(
+                    category_sn=category_sn,
+                    lang_code_id="en",  # 영문으로 수집
+                    max_places=max_places * 2,  # 매칭을 위해 더 많이 수집
+                    delay_between_pages=delay_between_api_calls
+                )
+                visit_seoul_items.extend(items)
+                logger.info(f"Collected {len(items)} places for category_sn: {category_sn}")
+        else:
+            logger.warning(f"Could not map category '{category}' to VISIT SEOUL category_sn, collecting all categories")
+            visit_seoul_items = collect_visit_seoul_places(
+                category_sn=None,  # 모든 카테고리 수집
+                lang_code_id="en",  # 영문으로 수집
+                max_places=max_places * 2,  # 매칭을 위해 더 많이 수집
+                delay_between_pages=delay_between_api_calls
+            )
         stats["visit_seoul_places_collected"] = len(visit_seoul_items)
         logger.info(f"Collected {len(visit_seoul_items)} VISIT SEOUL places")
         
-        logger.info("Step 4: Fetching VISIT SEOUL place details...")
+        logger.info("Step 2: Fetching VISIT SEOUL place details...")
         visit_seoul_places = []
         for idx, item in enumerate(visit_seoul_items):
             try:
-                content_id = item.get("contentId") or item.get("content_id") or item.get("id")
+                content_id = item.get("cid") or item.get("contentId") or item.get("content_id") or item.get("id")
                 
                 if not content_id:
-                    logger.warning(f"Skipping VISIT SEOUL item {idx + 1}: missing contentId")
+                    logger.warning(f"Skipping VISIT SEOUL item {idx + 1}: missing cid")
                     continue
                 
                 # 상세 정보 조회
@@ -220,25 +182,15 @@ def collect_category_places(
         
         logger.info(f"Processed {len(visit_seoul_places)} VISIT SEOUL places with details")
         
-        logger.info("Step 5: Matching TourAPI and VISIT SEOUL places...")
-        matches = find_best_matches(
-            tour_places=tour_places,
-            visit_seoul_places=visit_seoul_places,
-            max_distance_km=1.0,
-            min_name_similarity=0.6
-        )
-        stats["places_matched"] = len(matches)
-        logger.info(f"Matched {len(matches)} places")
-        
-        logger.info("Step 6: Merging and saving places...")
+        logger.info("Step 3: Saving places...")
         saved_count = 0
         quest_count = 0
         
-        # 매칭된 장소 저장
-        for tour_place, vs_place, distance, similarity in matches:
+        # VISIT SEOUL 장소 저장
+        for vs_place in visit_seoul_places:
             try:
-                # 데이터 통합
-                merged_data = merge_place_data(tour_place, vs_place)
+                # 데이터 통합 (VISIT SEOUL만 사용)
+                merged_data = merge_place_data(None, vs_place, category=category)
                 
                 # DB 저장
                 place_id = save_place(merged_data)
@@ -258,35 +210,7 @@ def collect_category_places(
                             stats["embeddings_created"] += 1
                 
             except Exception as e:
-                error_msg = f"Error saving matched place: {e}"
-                logger.error(error_msg, exc_info=True)
-                stats["errors"].append(error_msg)
-        
-        # 매칭되지 않은 TourAPI 장소도 저장 (VISIT SEOUL 데이터 없이)
-        unmatched_tour_places = [
-            tp for tp in tour_places
-            if not any(tp.get("content_id") == match[0].get("content_id") for match in matches)
-        ]
-        
-        logger.info(f"Saving {len(unmatched_tour_places)} unmatched TourAPI places...")
-        for tour_place in unmatched_tour_places:
-            try:
-                merged_data = merge_place_data(tour_place, None)
-                place_id = save_place(merged_data)
-                if place_id:
-                    saved_count += 1
-                    logger.info(f"Saved unmatched place: {place_id} ({merged_data['name']})")
-                    
-                    quest_id = create_quest_from_place(place_id)
-                    if quest_id:
-                        quest_count += 1
-                    
-                    # 이미지 임베딩 생성
-                    if create_embeddings and merged_data.get("image_url"):
-                        if create_image_embedding_for_place(place_id, merged_data["image_url"]):
-                            stats["embeddings_created"] += 1
-            except Exception as e:
-                error_msg = f"Error saving unmatched place: {e}"
+                error_msg = f"Error saving place: {e}"
                 logger.error(error_msg, exc_info=True)
                 stats["errors"].append(error_msg)
         
@@ -307,12 +231,12 @@ def collect_category_places(
 def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description="Collect places from TourAPI and VISIT SEOUL API")
+    parser = argparse.ArgumentParser(description="Collect places from VISIT SEOUL API")
     parser.add_argument(
         "--category",
         type=str,
         required=True,
-        choices=["Attraction", "Culture", "Events", "Shopping", "Food", "Extreme", "Sleep"],
+        choices=["Attractions", "History", "Culture", "Nature", "Food", "Drinks", "Shopping", "Activities", "Events"],
         help="Category to collect"
     )
     parser.add_argument(
@@ -350,10 +274,6 @@ def main():
     logger.info(f"API call delay: {args.delay}s")
     logger.info("=" * 60)
     
-    if not os.getenv("TOUR_API_KEY"):
-        logger.error("TOUR_API_KEY environment variable is required")
-        sys.exit(1)
-    
     if not os.getenv("VISIT_SEOUL_API_KEY"):
         logger.error("VISIT_SEOUL_API_KEY environment variable is required")
         sys.exit(1)
@@ -369,9 +289,7 @@ def main():
     logger.info("=" * 60)
     logger.info("Collection Statistics:")
     logger.info(f"  Category: {stats['category']}")
-    logger.info(f"  TourAPI places collected: {stats['tour_places_collected']}")
     logger.info(f"  VISIT SEOUL places collected: {stats['visit_seoul_places_collected']}")
-    logger.info(f"  Places matched: {stats['places_matched']}")
     logger.info(f"  Places saved: {stats['places_saved']}")
     logger.info(f"  Quests created: {stats['quests_created']}")
     logger.info(f"  Embeddings created: {stats['embeddings_created']}")

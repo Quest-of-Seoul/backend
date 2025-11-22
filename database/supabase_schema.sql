@@ -16,11 +16,11 @@ CREATE INDEX idx_users_email ON users(email);
 -- Places Table
 CREATE TABLE IF NOT EXISTS places (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name VARCHAR(255) NOT NULL,
-    name_en VARCHAR(255),
+    name VARCHAR(255) NOT NULL UNIQUE,
     description TEXT,
     category VARCHAR(50),
     address VARCHAR(500),
+    district VARCHAR(50),
     latitude DECIMAL(10, 8),
     longitude DECIMAL(11, 8),
     image_url TEXT,
@@ -35,11 +35,11 @@ CREATE TABLE IF NOT EXISTS places (
 
 CREATE INDEX idx_places_category ON places(category);
 CREATE INDEX idx_places_name ON places(name);
-CREATE INDEX idx_places_name_en ON places(name_en);
 CREATE INDEX idx_places_location ON places(latitude, longitude);
 CREATE INDEX idx_places_is_active ON places(is_active);
 CREATE INDEX idx_places_source ON places(source);
 CREATE INDEX idx_places_category_source ON places(category, source);
+CREATE INDEX idx_places_district ON places(district);
 
 -- JSONB 필드에 대한 GIN 인덱스
 CREATE INDEX idx_places_metadata_gin ON places USING GIN (metadata);
@@ -63,6 +63,25 @@ $$ language 'plpgsql';
 
 CREATE TRIGGER update_places_updated_at BEFORE UPDATE ON places
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Trigger function to auto-extract district from address
+CREATE OR REPLACE FUNCTION extract_district_trigger()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Extract district from address if district is NULL or address changed
+    IF NEW.district IS NULL AND NEW.address IS NOT NULL THEN
+        NEW.district := extract_district_from_address(NEW.address);
+    ELSIF OLD.address IS DISTINCT FROM NEW.address AND NEW.address IS NOT NULL THEN
+        NEW.district := extract_district_from_address(NEW.address);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER extract_district_on_insert_or_update
+    BEFORE INSERT OR UPDATE OF address, district ON places
+    FOR EACH ROW
+    EXECUTE FUNCTION extract_district_trigger();
 
 -- Quests Table
 CREATE TABLE IF NOT EXISTS quests (
@@ -216,6 +235,44 @@ CREATE INDEX idx_vlm_logs_location ON vlm_logs(latitude, longitude);
 CREATE INDEX idx_vlm_logs_pinecone_id ON vlm_logs(pinecone_vector_id);
 
 -- Functions
+
+-- Extract district from address using regex
+DROP FUNCTION IF EXISTS extract_district_from_address(VARCHAR);
+CREATE OR REPLACE FUNCTION extract_district_from_address(addr VARCHAR(500))
+RETURNS VARCHAR(50) AS $$
+DECLARE
+    district_name VARCHAR(50);
+    match_result TEXT[];
+BEGIN
+    IF addr IS NULL OR addr = '' THEN
+        RETURN NULL;
+    END IF;
+    
+    -- Try Korean pattern: "종로구", "강남구" etc. (한글 + 구)
+    match_result := regexp_match(addr, '[가-힣]+구');
+    IF match_result IS NOT NULL AND array_length(match_result, 1) > 0 THEN
+        district_name := match_result[1];
+        RETURN district_name;
+    END IF;
+    
+    -- Try English pattern: "Jongno-gu", "Gangnam-gu" etc.
+    match_result := regexp_match(addr, '[A-Za-z]+-gu', 'i');
+    IF match_result IS NOT NULL AND array_length(match_result, 1) > 0 THEN
+        -- Convert "Jongno-gu" to "Jongno-gu" (keep as is, or can normalize)
+        district_name := match_result[1];
+        RETURN district_name;
+    END IF;
+    
+    -- Try another English pattern: "Jongno gu" (with space)
+    match_result := regexp_match(addr, '[A-Za-z]+\s+gu', 'i');
+    IF match_result IS NOT NULL AND array_length(match_result, 1) > 0 THEN
+        district_name := REPLACE(match_result[1], ' ', '-');
+        RETURN district_name;
+    END IF;
+    
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
 
 -- Get user total points
 DROP FUNCTION IF EXISTS get_user_points(UUID);
@@ -464,23 +521,28 @@ $$ LANGUAGE plpgsql;
 -- Sample Data
 
 -- Sample Places
-INSERT INTO places (id, name, name_en, description, category, address, latitude, longitude, image_url, metadata)
+INSERT INTO places (id, name, description, category, address, latitude, longitude, image_url, metadata)
 VALUES
-    (uuid_generate_v4(), '경복궁', 'Gyeongbokgung Palace', '조선시대 대표 궁궐로, 1395년에 창건되었습니다. 근정전, 경회루 등 아름다운 전통 건축물을 감상할 수 있습니다.', '역사유적', '서울특별시 종로구 사직로 161', 37.579617, 126.977041, 'https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp', '{"opening_hours": "09:00-18:00", "closed": "화요일", "admission_fee": "3000원"}'::jsonb),
-    (uuid_generate_v4(), '남산서울타워', 'N Seoul Tower', '서울의 랜드마크로 해발 479.7m에 위치한 전망대입니다. 서울 시내 전경을 한눈에 볼 수 있습니다.', '관광지', '서울특별시 용산구 남산공원길 105', 37.551169, 126.988227, 'https://ak-d.tripcdn.com/images/100v0z000000nkadwE2AA_C_1200_800_Q70.webp', '{"opening_hours": "10:00-23:00", "admission_fee": "16000원"}'::jsonb),
-    (uuid_generate_v4(), '광화문광장', 'Gwanghwamun Square', '세종대왕과 이순신 장군 동상이 있는 서울의 대표 광장입니다.', '광장', '서울특별시 종로구 세종대로 172', 37.572889, 126.976849, 'https://ak-d.tripcdn.com/images/01051120008c32dlbE44A.webp', '{"opening_hours": "24시간", "admission_fee": "무료"}'::jsonb),
-    (uuid_generate_v4(), '명동성당', 'Myeongdong Cathedral', '1898년에 완공된 한국 최초의 고딕 양식 성당입니다.', '종교시설', '서울특별시 중구 명동길 74', 37.563600, 126.986870, 'https://ak-d.tripcdn.com/images/100f1f000001gqchv1B53.webp', '{"opening_hours": "09:00-21:00", "admission_fee": "무료"}'::jsonb),
-    (uuid_generate_v4(), '북촌한옥마을', 'Bukchon Hanok Village', '전통 한옥이 밀집한 역사적 주거지역으로 조선시대 양반들의 집이 보존되어 있습니다.', '문화마을', '서울특별시 종로구 계동길 37', 37.582306, 126.985302, 'https://ak-d.tripcdn.com/images/100p11000000r4rhv9EF4.jpg', '{"opening_hours": "24시간", "admission_fee": "무료"}'::jsonb)
-ON CONFLICT DO NOTHING;
+    (uuid_generate_v4(), 'Gyeongbokgung Palace', 'The main royal palace of the Joseon Dynasty, built in 1395. You can admire beautiful traditional architecture including Geunjeongjeon Hall and Gyeonghoeru Pavilion.', 'Historic Site', '161 Sajik-ro, Jongno-gu, Seoul', 37.579617, 126.977041, 'https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp', '{"opening_hours": "09:00-18:00", "closed": "Tuesday", "admission_fee": "3000 KRW"}'::jsonb),
+    (uuid_generate_v4(), 'N Seoul Tower', 'A landmark observatory located at 479.7m above sea level. You can enjoy a panoramic view of Seoul.', 'Attraction', '105 Namsan Park-gil, Yongsan-gu, Seoul', 37.551169, 126.988227, 'https://ak-d.tripcdn.com/images/100v0z000000nkadwE2AA_C_1200_800_Q70.webp', '{"opening_hours": "10:00-23:00", "admission_fee": "16000 KRW"}'::jsonb),
+    (uuid_generate_v4(), 'Gwanghwamun Square', 'Seoul''s representative square featuring statues of King Sejong the Great and Admiral Yi Sun-sin.', 'Square', '172 Sejong-daero, Jongno-gu, Seoul', 37.572889, 126.976849, 'https://ak-d.tripcdn.com/images/01051120008c32dlbE44A.webp', '{"opening_hours": "24 hours", "admission_fee": "Free"}'::jsonb),
+    (uuid_generate_v4(), 'Myeongdong Cathedral', 'Korea''s first Gothic-style cathedral, completed in 1898.', 'Religious Site', '74 Myeongdong-gil, Jung-gu, Seoul', 37.563600, 126.986870, 'https://ak-d.tripcdn.com/images/100f1f000001gqchv1B53.webp', '{"opening_hours": "09:00-21:00", "admission_fee": "Free"}'::jsonb),
+    (uuid_generate_v4(), 'Bukchon Hanok Village', 'A historic residential area with dense traditional hanok houses, preserving the homes of Joseon Dynasty aristocrats.', 'Cultural Village', '37 Gye-dong, Jongno-gu, Seoul', 37.582306, 126.985302, 'https://ak-d.tripcdn.com/images/100p11000000r4rhv9EF4.jpg', '{"opening_hours": "24 hours", "admission_fee": "Free"}'::jsonb)
+ON CONFLICT (name) DO NOTHING;
 
--- Sample Quests
-INSERT INTO quests (name, description, latitude, longitude, reward_point)
+-- Sample Quests (matching places)
+INSERT INTO quests (name, description, latitude, longitude, reward_point, category)
 VALUES
-    ('경복궁 (Gyeongbokgung Palace)', '조선왕조의 법궁으로, 서울의 대표적인 역사 유적지입니다.', 37.5796, 126.9770, 100),
-    ('남산타워 (N Seoul Tower)', '서울의 상징적인 랜드마크로, 도시 전경을 한눈에 볼 수 있습니다.', 37.5512, 126.9882, 150),
-    ('명동 (Myeongdong)', '서울의 쇼핑과 먹거리의 중심지입니다.', 37.5636, 126.9865, 80),
-    ('인사동 (Insadong)', '전통 문화와 예술이 살아있는 거리입니다.', 37.5730, 126.9856, 90),
-    ('홍대 (Hongdae)', '젊음과 문화가 넘치는 예술의 거리입니다.', 37.5563, 126.9236, 70);
+    ('Gyeongbokgung Palace', 'The main royal palace of the Joseon Dynasty, built in 1395. You can admire beautiful traditional architecture including Geunjeongjeon Hall and Gyeonghoeru Pavilion.', 37.579617, 126.977041, 100, 'Historic Site'),
+    ('N Seoul Tower', 'A landmark observatory located at 479.7m above sea level. You can enjoy a panoramic view of Seoul.', 37.551169, 126.988227, 150, 'Attraction'),
+    ('Gwanghwamun Square', 'Seoul''s representative square featuring statues of King Sejong the Great and Admiral Yi Sun-sin.', 37.572889, 126.976849, 90, 'Square'),
+    ('Myeongdong Cathedral', 'Korea''s first Gothic-style cathedral, completed in 1898.', 37.563600, 126.986870, 80, 'Religious Site'),
+    ('Bukchon Hanok Village', 'A historic residential area with dense traditional hanok houses, preserving the homes of Joseon Dynasty aristocrats.', 37.582306, 126.985302, 100, 'Cultural Village');
+
+-- Update places district from address
+UPDATE places
+SET district = extract_district_from_address(address)
+WHERE district IS NULL AND address IS NOT NULL;
 
 -- Update quests with place_id based on location matching (within 0.01 degrees ~ 1km)
 UPDATE quests q
@@ -498,11 +560,11 @@ WHERE q.place_id IS NULL;
 -- Sample Rewards
 INSERT INTO rewards (name, type, point_cost, description, is_active)
 VALUES
-    ('서울 여행 뱃지', 'badge', 50, '첫 퀘스트 완료 기념 뱃지', TRUE),
-    ('카페 할인 쿠폰', 'coupon', 100, '서울 내 제휴 카페 20% 할인', TRUE),
-    ('경복궁 입장권', 'coupon', 200, '경복궁 무료 입장권', TRUE),
-    ('서울 투어 마스터 뱃지', 'badge', 500, '모든 퀘스트 완료 기념 뱃지', TRUE),
-    ('한복 체험 쿠폰', 'coupon', 300, '한복 대여 50% 할인', TRUE);
+    ('Seoul Travel Badge', 'badge', 50, 'Commemorative badge for completing your first quest', TRUE),
+    ('Cafe Discount Coupon', 'coupon', 100, '20% discount at partner cafes in Seoul', TRUE),
+    ('Gyeongbokgung Palace Admission Ticket', 'coupon', 200, 'Free admission ticket to Gyeongbokgung Palace', TRUE),
+    ('Seoul Tour Master Badge', 'badge', 500, 'Commemorative badge for completing all quests', TRUE),
+    ('Hanbok Experience Coupon', 'coupon', 300, '50% discount on hanbok rental', TRUE);
 
 -- Table Comments
 COMMENT ON TABLE users IS '사용자 정보';
@@ -521,6 +583,7 @@ COMMENT ON TABLE vlm_logs IS 'VLM 이미지 분석 로그';
 COMMENT ON COLUMN places.source IS '데이터 출처: manual(수동입력), tour_api(TourAPI), visit_seoul(VISIT SEOUL API), both(양쪽 모두)';
 COMMENT ON COLUMN places.metadata IS '상세 메타데이터 (JSONB): tour_api, visit_seoul, rag_text 등 포함';
 COMMENT ON COLUMN places.images IS '이미지 URL 배열 (JSONB)';
+COMMENT ON COLUMN places.district IS '자치구 (주소에서 정규식으로 추출: 예: 종로구, 강남구)';
 
 -- Update table statistics for query optimization
 ANALYZE places;

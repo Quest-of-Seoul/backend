@@ -109,7 +109,6 @@ def recommend_places(
             recommendation = {
                 "place_id": metadata.get("place_id"),
                 "name": metadata.get("place_name", "Unknown"),
-                "name_en": metadata.get("name_en", ""),
                 "category": place_category,
                 "image_similarity": round(image_similarity, 3),
                 "category_match": round(category_match, 3),
@@ -210,7 +209,6 @@ def recommend_similar_to_place(
             recommendations.append({
                 "place_id": meta.get("place_id"),
                 "name": meta.get("place_name", "Unknown"),
-                "name_en": meta.get("name_en", ""),
                 "category": meta.get("category", ""),
                 "similarity": round(result["similarity"], 3),
                 "location": {
