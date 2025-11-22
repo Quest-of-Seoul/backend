@@ -252,14 +252,21 @@ TTS 스트리밍
   "quests": [
     {
       "id": 1,
-      "name": "경복궁",
-      "latitude": 37.5796,
-      "longitude": 126.9770,
-      "category": "Heritage",
-      "reward_point": 500,
-      "address": "서울특별시 종로구",
-      "description": "조선 왕조의 정궁",
-      "is_active": true
+      "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
+      "name": "Gyeongbokgung Palace",
+      "title": null,
+      "description": "The main royal palace of the Joseon Dynasty, built in 1395. You can admire beautiful traditional architecture including Geunjeongjeon Hall and Gyeonghoeru Pavilion.",
+      "category": "Historic Site",
+      "latitude": 37.579617,
+      "longitude": 126.977041,
+      "reward_point": 100,
+      "points": 10,
+      "difficulty": "easy",
+      "is_active": true,
+      "completion_count": 0,
+      "created_at": "2025-11-22T10:14:30.222474",
+      "district": "Jongno-gu",
+      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp"
     }
   ]
 }
