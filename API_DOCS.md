@@ -53,9 +53,17 @@ Production: `https://your-domain.com`
 - POST `/recommend/similar-places` - 장소 추천
 - GET `/recommend/nearby-quests` - 주변 퀘스트 추천
 - GET `/recommend/quests/category/{category}` - 카테고리별 퀘스트
+- GET `/recommend/quests/high-reward` - 포인트가 높은 퀘스트 추천
+- GET `/recommend/quests/newest` - 최신 퀘스트 추천
 - GET `/recommend/quests/{quest_id}` - 퀘스트 상세
 - POST `/recommend/quests/{quest_id}/submit` - 퀴즈 제출
 - GET `/recommend/stats` - 추천 시스템 통계
+
+### Map (맵 검색 및 필터)
+- POST `/map/search` - 장소명으로 퀘스트/장소 검색
+- POST `/map/filter` - 필터 조건으로 퀘스트/장소 검색
+- GET `/map/stats/{user_id}` - 맵 헤더 통계 조회
+- POST `/map/stats/walk-distance` - 선택한 퀘스트 루트의 총 거리 계산
 
 ---
 
@@ -880,9 +888,20 @@ VLM 서비스 상태 확인
   "count": 3,
   "recommendations": [
     {
+      "quest_id": 1,
       "place_id": "place-001",
       "similarity": 0.92,
+      "name": "Gyeongbokgung Palace",
+      "description": "The main royal palace of the Joseon Dynasty, built in 1395.",
+      "category": "Historic Site",
+      "latitude": 37.579617,
+      "longitude": 126.977041,
+      "reward_point": 100,
+      "district": "Jongno-gu",
+      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
+      "distance_km": 3.5,
       "place": {
+        "id": "place-001",
         "name": "경복궁",
         "category": "역사유적"
       }
@@ -895,6 +914,11 @@ VLM 서비스 상태 확인
   }
 }
 ```
+
+**Notes:**
+- `quest_id`는 해당 place에 연결된 활성 quest가 있을 때만 포함됩니다
+- `distance_km`는 `latitude`와 `longitude`가 제공될 때만 계산됩니다
+- Quest 정보가 없으면 Place 정보만 사용됩니다
 
 ---
 
@@ -919,16 +943,31 @@ VLM 서비스 상태 확인
   "count": 5,
   "quests": [
     {
-      "place_id": "place-001",
-      "place_name": "경복궁",
-      "category": "역사유적",
-      "distance_km": 0.5,
-      "quest_id": 1,
-      "quest_points": 100
+      "id": 1,
+      "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
+      "name": "Gyeongbokgung Palace",
+      "title": null,
+      "description": "The main royal palace of the Joseon Dynasty, built in 1395.",
+      "category": "Historic Site",
+      "latitude": 37.579617,
+      "longitude": 126.977041,
+      "reward_point": 100,
+      "points": 10,
+      "difficulty": "easy",
+      "is_active": true,
+      "completion_count": 0,
+      "created_at": "2025-11-22T10:14:30.222474",
+      "district": "Jongno-gu",
+      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
+      "distance_km": 0.5
     }
   ]
 }
 ```
+
+**Notes:**
+- 거리순으로 정렬됩니다 (`distance_km` 오름차순)
+- `distance_km`는 사용자 위치와 퀘스트 위치 간의 거리입니다 (km 단위)
 
 ---
 
@@ -964,6 +1003,107 @@ VLM 서비스 상태 확인
   ]
 }
 ```
+
+---
+
+### GET /recommend/quests/high-reward
+
+포인트가 높은 퀘스트 추천 (Wanna Get Some Mint? 섹션용)
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| latitude | float | 선택 | 사용자 현재 위도 (거리 계산용) |
+| longitude | float | 선택 | 사용자 현재 경도 (거리 계산용) |
+| limit | integer | 선택 | 결과 개수 (기본: 3) |
+| min_reward_point | integer | 선택 | 최소 포인트 (기본: 100) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "count": 3,
+  "quests": [
+    {
+      "id": 1,
+      "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
+      "name": "Gyeongbokgung Palace",
+      "title": null,
+      "description": "The main royal palace of the Joseon Dynasty, built in 1395.",
+      "category": "Historic Site",
+      "latitude": 37.579617,
+      "longitude": 126.977041,
+      "reward_point": 500,
+      "points": 10,
+      "difficulty": "easy",
+      "is_active": true,
+      "completion_count": 0,
+      "created_at": "2025-11-22T10:14:30.222474",
+      "district": "Jongno-gu",
+      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
+      "distance_km": 3.5
+    }
+  ]
+}
+```
+
+**Notes:**
+- `reward_point` 내림차순으로 정렬됩니다
+- `is_active = TRUE`인 퀘스트만 반환됩니다
+- `distance_km`는 `latitude`와 `longitude`가 제공될 때만 계산됩니다
+
+---
+
+### GET /recommend/quests/newest
+
+최신 퀘스트 추천 (See What's New in Seoul 섹션용)
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| latitude | float | 선택 | 사용자 현재 위도 (거리 계산용) |
+| longitude | float | 선택 | 사용자 현재 경도 (거리 계산용) |
+| limit | integer | 선택 | 결과 개수 (기본: 3) |
+| days | integer | 선택 | 최근 N일 이내 (기본: 30) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "count": 3,
+  "quests": [
+    {
+      "id": 1,
+      "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
+      "name": "Gyeongbokgung Palace",
+      "title": null,
+      "description": "The main royal palace of the Joseon Dynasty, built in 1395.",
+      "category": "Historic Site",
+      "latitude": 37.579617,
+      "longitude": 126.977041,
+      "reward_point": 100,
+      "points": 10,
+      "difficulty": "easy",
+      "is_active": true,
+      "completion_count": 0,
+      "created_at": "2025-11-22T10:14:30.222474",
+      "district": "Jongno-gu",
+      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
+      "distance_km": 3.5
+    }
+  ]
+}
+```
+
+**Notes:**
+- `created_at` 내림차순으로 정렬됩니다
+- `is_active = TRUE`인 퀘스트만 반환됩니다
+- `days` 파라미터로 최근 N일 이내 퀘스트만 필터링됩니다
+- `distance_km`는 `latitude`와 `longitude`가 제공될 때만 계산됩니다
 
 ---
 
@@ -1042,9 +1182,19 @@ VLM 서비스 상태 확인
 ```json
 {
   "success": true,
-  "is_correct": false
+  "is_correct": false,
+  "explanation": null
 }
 ```
+
+**Status Codes:**
+- 200: 성공
+- 404: 퀴즈를 찾을 수 없음
+- 500: 서버 오류
+
+**Notes:**
+- 정답일 경우에만 `explanation`이 포함됩니다
+- 정답 시 퀘스트 완료 카운트가 증가합니다
 
 ---
 
@@ -1063,6 +1213,279 @@ VLM 서비스 상태 확인
   "index_fullness": 0.05
 }
 ```
+
+---
+
+## Map Endpoints
+
+### POST /map/search
+
+장소명으로 퀘스트/장소 검색
+
+**Request Body:**
+
+```json
+{
+  "query": "경복궁",
+  "latitude": 37.5665,
+  "longitude": 126.9780,
+  "radius_km": 50.0,
+  "limit": 20
+}
+```
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| query | string | 필수 | 검색어 (장소명) |
+| latitude | float | 선택 | 사용자 현재 위도 (거리 계산용) |
+| longitude | float | 선택 | 사용자 현재 경도 (거리 계산용) |
+| radius_km | float | 선택 | 검색 반경 (기본: 50.0) |
+| limit | integer | 선택 | 결과 개수 (기본: 20) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "count": 5,
+  "quests": [
+    {
+      "id": 1,
+      "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
+      "name": "Gyeongbokgung Palace",
+      "title": null,
+      "description": "The main royal palace of the Joseon Dynasty, built in 1395.",
+      "category": "Historic Site",
+      "latitude": 37.579617,
+      "longitude": 126.977041,
+      "reward_point": 100,
+      "points": 10,
+      "difficulty": "easy",
+      "is_active": true,
+      "completion_count": 0,
+      "created_at": "2025-11-22T10:14:30.222474",
+      "district": "Jongno-gu",
+      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
+      "distance_km": 3.5
+    }
+  ]
+}
+```
+
+**Notes:**
+- 검색어는 `quests.name`, `places.name`, `places.metadata->>'rag_text'`에서 검색됩니다
+- 거리 순으로 정렬됩니다 (위도/경도 제공 시)
+- 반경 필터링은 위도/경도가 제공될 때만 적용됩니다
+
+---
+
+### POST /map/filter
+
+필터 조건으로 퀘스트/장소 검색
+
+**Request Body:**
+
+```json
+{
+  "categories": ["Attractions", "History"],
+  "districts": ["Jongno-gu", "Jung-gu"],
+  "sort_by": "nearest",
+  "latitude": 37.5665,
+  "longitude": 126.9780,
+  "radius_km": 50.0,
+  "limit": 20
+}
+```
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| categories | array[string] | 선택 | 카테고리 필터 (빈 배열이면 전체) |
+| districts | array[string] | 선택 | 자치구 필터 (빈 배열이면 전체) |
+| sort_by | string | 선택 | 정렬 기준 ("nearest", "rewarded", "newest", 기본: "nearest") |
+| latitude | float | 선택 | 사용자 현재 위도 |
+| longitude | float | 선택 | 사용자 현재 경도 |
+| radius_km | float | 선택 | 검색 반경 (기본: 50.0) |
+| limit | integer | 선택 | 결과 개수 (기본: 20) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "count": 5,
+  "quests": [
+    {
+      "id": 1,
+      "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
+      "name": "Gyeongbokgung Palace",
+      "title": null,
+      "description": "The main royal palace of the Joseon Dynasty, built in 1395.",
+      "category": "Historic Site",
+      "latitude": 37.579617,
+      "longitude": 126.977041,
+      "reward_point": 100,
+      "points": 10,
+      "difficulty": "easy",
+      "is_active": true,
+      "completion_count": 0,
+      "created_at": "2025-11-22T10:14:30.222474",
+      "district": "Jongno-gu",
+      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
+      "distance_km": 3.5
+    }
+  ],
+  "filters_applied": {
+    "categories": ["Attractions", "History"],
+    "districts": ["Jongno-gu", "Jung-gu"],
+    "sort_by": "nearest"
+  }
+}
+```
+
+**Notes:**
+- `sort_by`:
+  - `"nearest"`: 거리순 (위도/경도 제공 시), 없으면 reward_point 내림차순
+  - `"rewarded"`: reward_point 내림차순
+  - `"newest"`: created_at 내림차순
+
+---
+
+### GET /map/stats/{user_id}
+
+맵 헤더에 표시할 사용자 통계 조회
+
+**Path Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| user_id | string | 필수 | 사용자 ID |
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| quest_ids | array[integer] | 선택 | 선택한 퀘스트 ID 목록 (walk 거리 계산용) |
+| user_latitude | float | 선택 | 사용자 현재 위도 (walk 거리 계산용) |
+| user_longitude | float | 선택 | 사용자 현재 경도 (walk 거리 계산용) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "walk_distance_km": 2.5,
+  "mint_points": 350,
+  "walk_calculation": {
+    "type": "selected_quests_route",
+    "total_distance_km": 2.5,
+    "route": [
+      {
+        "from": "user_location",
+        "to": "quest_1",
+        "distance_km": 1.5
+      },
+      {
+        "from": "quest_1",
+        "to": "quest_2",
+        "distance_km": 1.0
+      }
+    ]
+  }
+}
+```
+
+**Status Codes:**
+- 200: 성공
+- 404: 사용자를 찾을 수 없음
+- 500: 서버 오류
+
+**Notes:**
+- `walk_distance_km`: 선택한 퀘스트 루트의 총 거리 (quest_ids 제공 시)
+- `mint_points`: 사용자 총 포인트 (모든 포인트 트랜잭션 합계)
+- `walk_calculation`은 `quest_ids`가 제공될 때만 포함됩니다
+
+---
+
+### POST /map/stats/walk-distance
+
+선택한 퀘스트 루트의 총 거리 계산 (walk 거리만)
+
+**Request Body:**
+
+```json
+{
+  "user_id": "user-123",
+  "quest_ids": [1, 2, 3],
+  "user_latitude": 37.5665,
+  "user_longitude": 126.9780
+}
+```
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| user_id | string | 필수 | 사용자 ID |
+| quest_ids | array[integer] | 필수 | 선택한 퀘스트 ID 목록 (순서대로) |
+| user_latitude | float | 필수 | 사용자 현재 위도 |
+| user_longitude | float | 필수 | 사용자 현재 경도 |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "total_distance_km": 2.5,
+  "route": [
+    {
+      "from": {
+        "type": "user_location",
+        "latitude": 37.5665,
+        "longitude": 126.9780
+      },
+      "to": {
+        "type": "quest",
+        "quest_id": 1,
+        "name": "Gyeongbokgung Palace",
+        "latitude": 37.579617,
+        "longitude": 126.977041
+      },
+      "distance_km": 1.5
+    },
+    {
+      "from": {
+        "type": "quest",
+        "quest_id": 1,
+        "name": "Gyeongbokgung Palace",
+        "latitude": 37.579617,
+        "longitude": 126.977041
+      },
+      "to": {
+        "type": "quest",
+        "quest_id": 2,
+        "name": "N Seoul Tower",
+        "latitude": 37.551169,
+        "longitude": 126.988227
+      },
+      "distance_km": 1.0
+    }
+  ]
+}
+```
+
+**Status Codes:**
+- 200: 성공
+- 400: 잘못된 요청 (quest_ids가 비어있거나, 위치 정보 없음)
+- 404: 퀘스트를 찾을 수 없음
+- 500: 서버 오류
+
+**Notes:**
+- 퀘스트 순서는 `quest_ids` 배열 순서대로 계산됩니다
+- 사용자 위치 → 첫 번째 퀘스트 → 두 번째 퀘스트 → ... 순으로 거리를 계산합니다
 
 ---
 
