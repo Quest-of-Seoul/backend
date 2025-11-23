@@ -41,13 +41,50 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 @router.get("/list")
 async def get_all_quests():
-    """Get all available quests"""
+    """Get all available quests with place information"""
     try:
         db = get_db()
-        result = db.table("quests").select("*").execute()
+        # Join with places table to get category and other place info
+        result = db.table("quests").select("*, places(category, district, name, address, image_url, images)").execute()
 
-        logger.info(f"Retrieved {len(result.data)} quests")
-        return {"quests": result.data}
+        # Post-process to merge place data into quest data
+        quests = []
+        for quest in result.data:
+            quest_data = dict(quest)
+            place = quest.get("places")
+            
+            # Handle different Supabase JOIN response formats
+            # Could be: None, empty dict {}, dict with data, or array
+            if place:
+                if isinstance(place, list) and len(place) > 0:
+                    place = place[0]  # Take first place if array
+                elif isinstance(place, dict) and len(place) > 0:
+                    pass  # Already a dict
+                else:
+                    place = None
+            
+            # If place exists, merge place data into quest
+            if place and isinstance(place, dict):
+                # Merge place category and district if quest doesn't have them
+                if not quest_data.get("category") and place.get("category"):
+                    quest_data["category"] = place["category"]
+                if not quest_data.get("district") and place.get("district"):
+                    quest_data["district"] = place["district"]
+                # Add place address if available
+                if place.get("address"):
+                    quest_data["address"] = place["address"]
+                # Add place image info if available
+                if place.get("image_url"):
+                    quest_data["place_image_url"] = place["image_url"]
+                if place.get("images"):
+                    quest_data["place_images"] = place["images"]
+            
+            # Remove the nested places object
+            quest_data.pop("places", None)
+            quests.append(quest_data)
+
+        logger.info(f"Retrieved {len(quests)} quests")
+        return {"quests": quests}
 
     except Exception as e:
         logger.error(f"Error fetching quests: {e}", exc_info=True)
@@ -61,7 +98,8 @@ async def get_nearby_quests(request: NearbyQuestRequest):
     """
     try:
         db = get_db()
-        all_quests = db.table("quests").select("*").execute()
+        # Join with places table to get category and other place info
+        all_quests = db.table("quests").select("*, places(category, district, name, image_url, images)").execute()
 
         # Filter quests within radius
         nearby = []
@@ -73,6 +111,29 @@ async def get_nearby_quests(request: NearbyQuestRequest):
             if distance <= request.radius_km:
                 # Add distance and rename fields for nearby endpoint
                 quest_obj = dict(quest)
+                
+                # Merge place data if available
+                place = quest_obj.get("places")
+                # Handle different Supabase JOIN response formats
+                if place:
+                    if isinstance(place, list) and len(place) > 0:
+                        place = place[0]  # Take first place if array
+                    elif isinstance(place, dict) and len(place) > 0:
+                        pass  # Already a dict
+                    else:
+                        place = None
+                
+                if place and isinstance(place, dict):
+                    if not quest_obj.get("category") and place.get("category"):
+                        quest_obj["category"] = place["category"]
+                    if not quest_obj.get("district") and place.get("district"):
+                        quest_obj["district"] = place["district"]
+                    if place.get("image_url"):
+                        quest_obj["place_image_url"] = place["image_url"]
+                    if place.get("images"):
+                        quest_obj["place_images"] = place["images"]
+                
+                quest_obj.pop("places", None)
                 quest_obj['quest_id'] = quest['id']  # Frontend expects quest_id for nearby
                 quest_obj['title'] = quest['name']   # Frontend expects title for nearby
                 quest_obj['distance_km'] = round(distance, 2)

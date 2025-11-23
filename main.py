@@ -9,7 +9,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import docent, quest, reward, vlm, recommend
+from routers import docent, quest, reward, vlm, recommend, map
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,6 +53,10 @@ app = FastAPI(
         {
             "name": "Recommend - Place Recommendation",
             "description": "AI-based place recommendation using image similarity"
+        },
+        {
+            "name": "Map - Search & Filter",
+            "description": "Map-based quest and place search with filtering"
         }
     ]
 )
@@ -70,6 +74,7 @@ app.include_router(quest.router, prefix="/quest", tags=["Quest"])
 app.include_router(reward.router, prefix="/reward", tags=["Reward"])
 app.include_router(vlm.router, prefix="/vlm", tags=["VLM - Image Analysis"])
 app.include_router(recommend.router, prefix="/recommend", tags=["Recommend - Place Recommendation"])
+app.include_router(map.router, prefix="/map", tags=["Map - Search & Filter"])
 
 @app.get("/")
 async def root():
