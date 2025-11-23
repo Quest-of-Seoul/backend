@@ -1,0 +1,334 @@
+"""Map Search & Filter Router"""
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Optional, List
+from services.db import get_db
+import math
+import logging
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+
+# 카테고리 매핑 (프론트엔드 → DB)
+CATEGORY_MAPPING = {
+    "Attractions": ["Attraction"],
+    "History": ["Historic Site"],
+    "Culture": ["Cultural Village", "문화"],
+    "Nature": ["Nature", "자연"],
+    "Food": ["Food", "음식"],
+    "Drinks": ["Drinks", "음료"],
+    "Shopping": ["Shopping", "쇼핑"],
+    "Activities": ["Activities", "활동"],
+    "Events": ["Events", "이벤트"],
+}
+
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate distance between two points using Haversine formula (returns km)"""
+    R = 6371
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2) ** 2 + \
+        math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    return R * c
+
+
+def map_frontend_categories(frontend_categories: List[str]) -> List[str]:
+    """프론트엔드 카테고리를 DB 카테고리로 매핑"""
+    db_categories = []
+    for frontend_cat in frontend_categories:
+        if frontend_cat in CATEGORY_MAPPING:
+            db_categories.extend(CATEGORY_MAPPING[frontend_cat])
+        else:
+            # 매핑이 없으면 그대로 사용 (직접 매칭 시도)
+            db_categories.append(frontend_cat)
+    return db_categories
+
+
+class MapSearchRequest(BaseModel):
+    query: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    radius_km: float = 50.0
+    limit: int = 20
+
+
+class MapFilterRequest(BaseModel):
+    categories: Optional[List[str]] = None
+    districts: Optional[List[str]] = None
+    sort_by: str = "nearest"  # "nearest", "rewarded", "newest"
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    radius_km: float = 50.0
+    limit: int = 20
+
+
+def format_quest_response(quest: dict, place: Optional[dict] = None, distance_km: Optional[float] = None) -> dict:
+    """퀘스트 응답 포맷팅"""
+    result = {
+        "id": quest.get("id"),
+        "place_id": quest.get("place_id"),
+        "name": quest.get("name"),
+        "title": quest.get("title"),
+        "description": quest.get("description"),
+        "category": quest.get("category"),
+        "latitude": float(quest.get("latitude")) if quest.get("latitude") else None,
+        "longitude": float(quest.get("longitude")) if quest.get("longitude") else None,
+        "reward_point": quest.get("reward_point"),
+        "points": quest.get("points"),
+        "difficulty": quest.get("difficulty"),
+        "is_active": quest.get("is_active"),
+        "completion_count": quest.get("completion_count"),
+        "created_at": quest.get("created_at"),
+    }
+    
+    # Place 정보 병합
+    if place:
+        if place.get("district"):
+            result["district"] = place["district"]
+        if place.get("image_url"):
+            result["place_image_url"] = place["image_url"]
+    
+    # 거리 정보 추가
+    if distance_km is not None:
+        result["distance_km"] = round(distance_km, 2)
+    
+    return result
+
+
+@router.post("/search")
+async def map_search(request: MapSearchRequest):
+    """
+    장소명으로 퀘스트/장소 검색
+    
+    - query: 검색어 (장소명)
+    - latitude, longitude: 사용자 현재 위치 (거리 계산용)
+    - radius_km: 검색 반경 (기본: 50.0)
+    - limit: 결과 개수 (기본: 20)
+    """
+    try:
+        db = get_db()
+        
+        # 기본 쿼리: is_active = TRUE인 퀘스트만
+        query = db.table("quests").select("*, places(*)").eq("is_active", True)
+        
+        # 검색어로 필터링 (quests.name, places.name, places.metadata->>'rag_text')
+        # Supabase는 OR 조건이 제한적이므로, 여러 쿼리를 실행하거나 Python에서 필터링
+        # 일단 모든 활성 퀘스트를 가져온 후 Python에서 필터링
+        
+        all_quests_result = query.execute()
+        
+        # 검색어로 필터링
+        search_query_lower = request.query.lower()
+        filtered_quests = []
+        
+        for quest_data in all_quests_result.data:
+            quest = dict(quest_data)
+            place = quest.get("places")
+            
+            # Place 데이터 정규화
+            if place:
+                if isinstance(place, list) and len(place) > 0:
+                    place = place[0]
+                elif isinstance(place, dict) and len(place) > 0:
+                    pass
+                else:
+                    place = None
+            
+            # 검색어 매칭 확인
+            matched = False
+            
+            # quests.name 검색
+            if quest.get("name") and search_query_lower in quest.get("name", "").lower():
+                matched = True
+            
+            # places.name 검색
+            if not matched and place and place.get("name"):
+                if search_query_lower in place.get("name", "").lower():
+                    matched = True
+            
+            # places.metadata->>'rag_text' 검색
+            if not matched and place and place.get("metadata"):
+                metadata = place.get("metadata")
+                if isinstance(metadata, dict):
+                    rag_text = metadata.get("rag_text", "")
+                else:
+                    # JSONB가 dict가 아닌 경우 (문자열 등)
+                    rag_text = str(metadata) if metadata else ""
+                if rag_text and search_query_lower in rag_text.lower():
+                    matched = True
+            
+            if matched:
+                # 거리 계산
+                distance_km = None
+                if request.latitude and request.longitude and quest.get("latitude") and quest.get("longitude"):
+                    distance_km = haversine_distance(
+                        request.latitude, request.longitude,
+                        float(quest["latitude"]), float(quest["longitude"])
+                    )
+                    
+                    # 반경 필터링
+                    if distance_km > request.radius_km:
+                        continue
+                
+                filtered_quests.append({
+                    "quest": quest,
+                    "place": place,
+                    "distance_km": distance_km
+                })
+        
+        # 정렬: 거리 오름차순 (위도/경도 제공 시), 그 외는 reward_point 내림차순
+        if request.latitude and request.longitude:
+            filtered_quests.sort(key=lambda x: x["distance_km"] if x["distance_km"] is not None else float('inf'))
+        else:
+            filtered_quests.sort(key=lambda x: x["quest"].get("reward_point", 0), reverse=True)
+        
+        # Limit 적용
+        filtered_quests = filtered_quests[:request.limit]
+        
+        # 응답 포맷팅
+        quests = [
+            format_quest_response(item["quest"], item["place"], item["distance_km"])
+            for item in filtered_quests
+        ]
+        
+        logger.info(f"Map search: query='{request.query}', found {len(quests)} quests")
+        
+        return {
+            "success": True,
+            "count": len(quests),
+            "quests": quests
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in map search: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error searching quests: {str(e)}")
+
+
+@router.post("/filter")
+async def map_filter(request: MapFilterRequest):
+    """
+    필터 조건으로 퀘스트/장소 검색
+    
+    - categories: 카테고리 필터 (빈 배열이면 전체)
+    - districts: 자치구 필터 (빈 배열이면 전체)
+    - sort_by: 정렬 기준 ("nearest", "rewarded", "newest")
+    - latitude, longitude: 사용자 현재 위치
+    - radius_km: 검색 반경 (기본: 50.0)
+    - limit: 결과 개수 (기본: 20)
+    """
+    try:
+        db = get_db()
+        
+        # 기본 쿼리: is_active = TRUE인 퀘스트만
+        query = db.table("quests").select("*, places(*)").eq("is_active", True)
+        
+        # 프론트엔드 카테고리를 DB 카테고리로 매핑 (한 번만 실행)
+        db_categories = None
+        if request.categories and len(request.categories) > 0:
+            db_categories = map_frontend_categories(request.categories)
+        
+        # 모든 활성 퀘스트 가져오기
+        all_quests_result = query.execute()
+        
+        filtered_quests = []
+        
+        for quest_data in all_quests_result.data:
+            quest = dict(quest_data)
+            place = quest.get("places")
+            
+            # Place 데이터 정규화
+            if place:
+                if isinstance(place, list) and len(place) > 0:
+                    place = place[0]
+                elif isinstance(place, dict) and len(place) > 0:
+                    pass
+                else:
+                    place = None
+            
+            # 카테고리 필터링
+            if db_categories:
+                quest_category = quest.get("category") or (place.get("category") if place else None)
+                
+                if not quest_category or quest_category not in db_categories:
+                    # 카테고리 매핑에서 부분 매칭 시도
+                    matched = False
+                    for db_cat in db_categories:
+                        if db_cat.lower() in (quest_category or "").lower() or (quest_category or "").lower() in db_cat.lower():
+                            matched = True
+                            break
+                    if not matched:
+                        continue
+            
+            # 자치구 필터링
+            if request.districts and len(request.districts) > 0:
+                place_district = place.get("district") if place else None
+                if not place_district or place_district not in request.districts:
+                    continue
+            
+            # 거리 계산 및 반경 필터링
+            distance_km = None
+            if request.latitude and request.longitude and quest.get("latitude") and quest.get("longitude"):
+                distance_km = haversine_distance(
+                    request.latitude, request.longitude,
+                    float(quest["latitude"]), float(quest["longitude"])
+                )
+                
+                # 반경 필터링
+                if distance_km > request.radius_km:
+                    continue
+            
+            filtered_quests.append({
+                "quest": quest,
+                "place": place,
+                "distance_km": distance_km
+            })
+        
+        # 정렬
+        if request.sort_by == "nearest":
+            if request.latitude and request.longitude:
+                filtered_quests.sort(key=lambda x: x["distance_km"] if x["distance_km"] is not None else float('inf'))
+            else:
+                # 위치 정보가 없으면 reward_point 내림차순으로 대체
+                filtered_quests.sort(key=lambda x: x["quest"].get("reward_point", 0), reverse=True)
+        elif request.sort_by == "rewarded":
+            filtered_quests.sort(key=lambda x: x["quest"].get("reward_point", 0), reverse=True)
+        elif request.sort_by == "newest":
+            filtered_quests.sort(key=lambda x: x["quest"].get("created_at", ""), reverse=True)
+        else:
+            # 기본값: reward_point 내림차순
+            filtered_quests.sort(key=lambda x: x["quest"].get("reward_point", 0), reverse=True)
+        
+        # Limit 적용
+        filtered_quests = filtered_quests[:request.limit]
+        
+        # 응답 포맷팅
+        quests = [
+            format_quest_response(item["quest"], item["place"], item["distance_km"])
+            for item in filtered_quests
+        ]
+        
+        logger.info(f"Map filter: categories={request.categories}, districts={request.districts}, sort_by={request.sort_by}, found {len(quests)} quests")
+        
+        return {
+            "success": True,
+            "count": len(quests),
+            "quests": quests,
+            "filters_applied": {
+                "categories": request.categories or [],
+                "districts": request.districts or [],
+                "sort_by": request.sort_by
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in map filter: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error filtering quests: {str(e)}")
+
