@@ -325,7 +325,15 @@ BEGIN
         )::FLOAT AS distance_km
     FROM places p
     WHERE p.is_active = TRUE
-    HAVING distance_km <= radius_km
+        AND (
+            6371 * ACOS(
+                COS(RADIANS(lat)) *
+                COS(RADIANS(p.latitude)) *
+                COS(RADIANS(p.longitude) - RADIANS(lon)) +
+                SIN(RADIANS(lat)) *
+                SIN(RADIANS(p.latitude))
+            )
+        ) <= radius_km
     ORDER BY distance_km
     LIMIT limit_count;
 END;
@@ -368,7 +376,15 @@ BEGIN
     INNER JOIN quests q ON p.id = q.place_id
     WHERE q.is_active = TRUE
         AND p.is_active = TRUE
-    HAVING distance_km <= radius_km
+        AND (
+            6371 * ACOS(
+                COS(RADIANS(lat)) *
+                COS(RADIANS(p.latitude)) *
+                COS(RADIANS(p.longitude) - RADIANS(lon)) +
+                SIN(RADIANS(lat)) *
+                SIN(RADIANS(p.latitude))
+            )
+        ) <= radius_km
     ORDER BY distance_km
     LIMIT limit_count;
 END;
@@ -556,6 +572,94 @@ SET place_id = (
     LIMIT 1
 )
 WHERE q.place_id IS NULL;
+
+-- Sample Quest Quizzes
+INSERT INTO quest_quizzes (quest_id, question, options, correct_answer, hint, explanation, difficulty)
+VALUES
+    -- Gyeongbokgung Palace 퀴즈
+    ((SELECT id FROM quests WHERE name = 'Gyeongbokgung Palace' LIMIT 1),
+     '경복궁은 몇 년에 창건되었나요?',
+     '["1392년", "1395년", "1400년", "1405년"]'::jsonb,
+     1,
+     '조선 건국 후 3년',
+     '경복궁은 조선왕조의 법궁으로 1395년(태조 4년)에 창건되었습니다.',
+     'easy'),
+    
+    ((SELECT id FROM quests WHERE name = 'Gyeongbokgung Palace' LIMIT 1),
+     '경복궁의 정전(正殿) 이름은 무엇인가요?',
+     '["근정전", "사정전", "교태전", "강녕전"]'::jsonb,
+     0,
+     '정전은 왕이 신하들을 만나고 국가의 중요한 의식을 거행하던 곳입니다',
+     '근정전은 경복궁의 정전으로, 왕이 조회를 받고 국가의 중요한 의식을 거행하던 곳입니다.',
+     'medium'),
+    
+    -- N Seoul Tower 퀴즈
+    ((SELECT id FROM quests WHERE name = 'N Seoul Tower' LIMIT 1),
+     'N서울타워의 해발고도는 얼마인가요?',
+     '["479.7m", "500m", "450m", "520m"]'::jsonb,
+     0,
+     '타워의 높이는 약 480m 정도입니다',
+     'N서울타워는 해발 479.7m에 위치한 서울의 랜드마크입니다.',
+     'easy'),
+    
+    ((SELECT id FROM quests WHERE name = 'N Seoul Tower' LIMIT 1),
+     'N서울타워가 위치한 산의 이름은 무엇인가요?',
+     '["북한산", "남산", "인왕산", "도봉산"]'::jsonb,
+     1,
+     '서울 중심부에 위치한 서울의 대표적인 산입니다',
+     'N서울타워는 남산에 위치해 있으며, 서울 시내를 한눈에 내려다볼 수 있습니다.',
+     'easy'),
+    
+    -- Gwanghwamun Square 퀴즈
+    ((SELECT id FROM quests WHERE name = 'Gwanghwamun Square' LIMIT 1),
+     '광화문광장에 세워진 세종대왕 동상의 특징은 무엇인가요?',
+     '["한글을 발명한 왕", "조선을 건국한 왕", "임진왜란을 승리로 이끈 왕", "고려를 건국한 왕"]'::jsonb,
+     0,
+     '한글 창제와 관련이 있습니다',
+     '세종대왕은 한글(훈민정음)을 창제한 왕으로, 광화문광장에는 세종대왕 동상이 세워져 있습니다.',
+     'easy'),
+    
+    ((SELECT id FROM quests WHERE name = 'Gwanghwamun Square' LIMIT 1),
+     '광화문광장에 함께 세워진 또 다른 동상의 주인공은 누구인가요?',
+     '["이순신", "김유신", "을지문덕", "강감찬"]'::jsonb,
+     0,
+     '임진왜란 때 활약한 해군 장수입니다',
+     '광화문광장에는 세종대왕 동상과 함께 이순신 장군 동상이 세워져 있습니다.',
+     'medium'),
+    
+    -- Myeongdong Cathedral 퀴즈
+    ((SELECT id FROM quests WHERE name = 'Myeongdong Cathedral' LIMIT 1),
+     '명동성당이 완공된 연도는 언제인가요?',
+     '["1895년", "1898년", "1900년", "1902년"]'::jsonb,
+     1,
+     '19세기 말에 완공되었습니다',
+     '명동성당은 한국 최초의 고딕 양식 성당으로 1898년에 완공되었습니다.',
+     'medium'),
+    
+    ((SELECT id FROM quests WHERE name = 'Myeongdong Cathedral' LIMIT 1),
+     '명동성당의 건축 양식은 무엇인가요?',
+     '["바로크 양식", "고딕 양식", "로마네스크 양식", "르네상스 양식"]'::jsonb,
+     1,
+     '첫 번째로 지어진 한국의 이 양식 성당입니다',
+     '명동성당은 한국 최초의 고딕 양식 성당으로, 높은 첨탑과 아치형 창문이 특징입니다.',
+     'easy'),
+    
+    -- Bukchon Hanok Village 퀴즈
+    ((SELECT id FROM quests WHERE name = 'Bukchon Hanok Village' LIMIT 1),
+     '북촌한옥마을이 위치한 지역은 어디인가요?',
+     '["종로구", "강남구", "서초구", "용산구"]'::jsonb,
+     0,
+     '경복궁과 가까운 지역입니다',
+     '북촌한옥마을은 종로구 계동과 가회동 일대에 위치한 전통 한옥 밀집 지역입니다.',
+     'easy'),
+    
+    ((SELECT id FROM quests WHERE name = 'Bukchon Hanok Village' LIMIT 1),
+     '북촌한옥마을의 주요 특징은 무엇인가요?',
+     '["조선시대 귀족들의 주거지", "상인들의 상업지구", "궁궐의 부속 건물", "사찰 건물"]'::jsonb,
+     0,
+     '조선시대 상류층이 살던 곳입니다',
+     '북촌한옥마을은 조선시대 양반과 귀족들이 거주하던 주거지역으로, 전통 한옥이 밀집해 있습니다.',
+     'medium');
 
 -- Sample Rewards
 INSERT INTO rewards (name, type, point_cost, description, is_active)
