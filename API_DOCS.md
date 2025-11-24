@@ -65,6 +65,14 @@ Production: `https://your-domain.com`
 - GET `/map/stats/{user_id}` - 맵 헤더 통계 조회
 - POST `/map/stats/walk-distance` - 선택한 퀘스트 루트의 총 거리 계산
 
+### AI Station (AI Station 통합 기능)
+- GET `/ai-station/chat-list` - 채팅 리스트 조회 (모드별, 기능별)
+- POST `/ai-station/explore/rag-chat` - 탐색 모드 RAG 채팅 (텍스트만 저장)
+- POST `/ai-station/quest/rag-chat` - 퀘스트 모드 RAG 채팅
+- POST `/ai-station/quest/vlm-chat` - 퀘스트 모드 VLM 채팅 (이미지+텍스트 저장)
+- POST `/ai-station/stt-tts` - STT + TTS 통합 (음성 입력 → 텍스트 → 음성 출력)
+- POST `/ai-station/route-recommend` - 여행지 경로 추천 (4개 퀘스트 추천)
+
 ---
 
 ## Docent Endpoints
@@ -1486,6 +1494,223 @@ VLM 서비스 상태 확인
 **Notes:**
 - 퀘스트 순서는 `quest_ids` 배열 순서대로 계산됩니다
 - 사용자 위치 → 첫 번째 퀘스트 → 두 번째 퀘스트 → ... 순으로 거리를 계산합니다
+
+---
+
+## AI Station Endpoints
+
+### GET /ai-station/chat-list
+
+채팅 리스트 조회 (하프 모달용)
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| user_id | string | 필수 | 사용자 ID |
+| mode | string | 선택 | 모드 필터 (explore/quest) |
+| function_type | string | 선택 | 기능 타입 필터 (rag_chat/vlm_chat/route_recommend/image_similarity) |
+| limit | integer | 선택 | 결과 개수 (기본: 20) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "sessions": [
+    {
+      "session_id": "uuid",
+      "mode": "explore",
+      "function_type": "rag_chat",
+      "landmark": "경복궁",
+      "created_at": "2024-01-01T12:00:00Z",
+      "updated_at": "2024-01-01T12:00:00Z",
+      "preview": "근정전에 대해 알려줘",
+      "chats": [
+        {
+          "id": 1,
+          "user_message": "근정전에 대해 알려줘",
+          "ai_response": "근정전은...",
+          "created_at": "2024-01-01T12:00:00Z"
+        }
+      ]
+    }
+  ],
+  "count": 1
+}
+```
+
+---
+
+### POST /ai-station/explore/rag-chat
+
+탐색 모드 - 일반 RAG 채팅 (텍스트만 저장)
+
+**Request Body:**
+
+```json
+{
+  "user_id": "user-123",
+  "user_message": "경복궁 근정전에 대해 알려줘",
+  "language": "ko",
+  "prefer_url": false,
+  "enable_tts": true,
+  "chat_session_id": "uuid-optional"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "근정전은 경복궁의 정전으로...",
+  "session_id": "uuid",
+  "audio": "base64_encoded_audio_or_null",
+  "audio_url": "https://storage.url/audio.mp3_or_null"
+}
+```
+
+---
+
+### POST /ai-station/quest/rag-chat
+
+퀘스트 모드 - 일반 RAG 채팅
+
+**Request Body:**
+
+```json
+{
+  "user_id": "user-123",
+  "user_message": "이 장소의 역사를 알려줘",
+  "landmark": "경복궁",
+  "language": "ko",
+  "prefer_url": false,
+  "enable_tts": true,
+  "chat_session_id": "uuid-optional"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "경복궁은 조선왕조의 법궁으로...",
+  "landmark": "경복궁",
+  "session_id": "uuid",
+  "audio": "base64_encoded_audio_or_null"
+}
+```
+
+---
+
+### POST /ai-station/quest/vlm-chat
+
+퀘스트 모드 - VLM 채팅 (이미지+텍스트 저장)
+
+**Request Body:**
+
+```json
+{
+  "user_id": "user-123",
+  "image": "base64_encoded_image",
+  "user_message": "이 장소가 뭐야?",
+  "language": "ko",
+  "prefer_url": false,
+  "enable_tts": true,
+  "chat_session_id": "uuid-optional"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "경복궁은 조선시대 법궁으로...",
+  "place": {
+    "id": "place-001",
+    "name": "경복궁",
+    "category": "역사유적"
+  },
+  "image_url": "https://storage.url/image.jpg",
+  "session_id": "uuid",
+  "audio": "base64_encoded_audio_or_null"
+}
+```
+
+---
+
+### POST /ai-station/stt-tts
+
+STT + TTS 통합 엔드포인트
+
+**Request Body:**
+
+```json
+{
+  "user_id": "user-123",
+  "audio": "base64_encoded_audio",
+  "language_code": "ko-KR",
+  "prefer_url": false
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "transcribed_text": "경복궁에 대해 알려줘",
+  "audio_url": "https://storage.url/audio.mp3_or_null",
+  "audio": "base64_encoded_audio"
+}
+```
+
+---
+
+### POST /ai-station/route-recommend
+
+여행지 경로 추천 (4개 퀘스트 추천)
+
+**Request Body:**
+
+```json
+{
+  "user_id": "user-123",
+  "preferences": {
+    "category": "역사유적",
+    "difficulty": "easy",
+    "duration": "half_day"
+  },
+  "must_visit_place_id": "place-001",
+  "latitude": 37.5665,
+  "longitude": 126.9780
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "quests": [
+    {
+      "id": 1,
+      "name": "Gyeongbokgung Palace",
+      "description": "...",
+      "category": "Historic Site",
+      "latitude": 37.579617,
+      "longitude": 126.977041,
+      "reward_point": 100,
+      "distance_km": 1.5
+    }
+  ],
+  "count": 4,
+  "session_id": "uuid"
+}
+```
 
 ---
 

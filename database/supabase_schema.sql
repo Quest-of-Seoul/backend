@@ -201,12 +201,18 @@ CREATE TABLE IF NOT EXISTS chat_logs (
     landmark VARCHAR(255),
     user_message TEXT,
     ai_response TEXT,
+    mode VARCHAR(20) DEFAULT 'explore' CHECK (mode IN ('explore', 'quest')),
+    function_type VARCHAR(50) DEFAULT 'rag_chat' CHECK (function_type IN ('rag_chat', 'vlm_chat', 'route_recommend', 'image_similarity')),
+    image_url TEXT,
+    chat_session_id UUID,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_chat_logs_user_id ON chat_logs(user_id);
 CREATE INDEX idx_chat_logs_landmark ON chat_logs(landmark);
 CREATE INDEX idx_chat_logs_created_at ON chat_logs(created_at);
+CREATE INDEX idx_chat_logs_mode_function ON chat_logs(user_id, mode, function_type, created_at DESC);
+CREATE INDEX idx_chat_logs_session ON chat_logs(chat_session_id);
 
 -- VLM Logs Table
 CREATE TABLE IF NOT EXISTS vlm_logs (
@@ -681,6 +687,10 @@ COMMENT ON TABLE points IS '포인트 트랜잭션 로그';
 COMMENT ON TABLE rewards IS '포인트로 교환 가능한 리워드 아이템';
 COMMENT ON TABLE user_rewards IS '사용자가 획득한 리워드 목록';
 COMMENT ON TABLE chat_logs IS 'AI 도슨트 대화 기록';
+COMMENT ON COLUMN chat_logs.mode IS '채팅 모드: explore(탐색 모드), quest(퀘스트 모드)';
+COMMENT ON COLUMN chat_logs.function_type IS '기능 타입: rag_chat(일반 RAG 채팅), vlm_chat(VLM 채팅), route_recommend(경로 추천), image_similarity(이미지 유사도)';
+COMMENT ON COLUMN chat_logs.image_url IS '이미지 URL (퀘스트 모드 VLM 채팅용)';
+COMMENT ON COLUMN chat_logs.chat_session_id IS '채팅 세션 ID (같은 대화를 묶는 UUID)';
 COMMENT ON TABLE vlm_logs IS 'VLM 이미지 분석 로그';
 
 -- Column Comments for places table
