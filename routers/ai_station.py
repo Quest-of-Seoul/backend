@@ -554,7 +554,11 @@ async def recommend_route(request: RouteRecommendRequest):
             recommended_quests.append(must_visit_quest)
         
         # 나머지 3개 선택 (필수 방문 장소 제외)
-        remaining_quests = [q for q in quests if q.get("id") != must_visit_quest.get("id") if must_visit_quest else True]
+        if must_visit_quest:
+            must_visit_id = must_visit_quest.get("id")
+            remaining_quests = [q for q in quests if q.get("id") != must_visit_id]
+        else:
+            remaining_quests = quests
         recommended_quests.extend(remaining_quests[:3])
         
         # 4개로 맞추기
