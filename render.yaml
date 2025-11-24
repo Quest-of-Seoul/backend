@@ -11,7 +11,7 @@ services:
     envVars:
       # Server
       - key: PORT
-        value: 10000
+        value: 8000
       # Database
       - key: SUPABASE_URL
         sync: false
