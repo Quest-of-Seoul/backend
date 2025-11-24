@@ -325,7 +325,15 @@ BEGIN
         )::FLOAT AS distance_km
     FROM places p
     WHERE p.is_active = TRUE
-    HAVING distance_km <= radius_km
+        AND (
+            6371 * ACOS(
+                COS(RADIANS(lat)) *
+                COS(RADIANS(p.latitude)) *
+                COS(RADIANS(p.longitude) - RADIANS(lon)) +
+                SIN(RADIANS(lat)) *
+                SIN(RADIANS(p.latitude))
+            )
+        ) <= radius_km
     ORDER BY distance_km
     LIMIT limit_count;
 END;
@@ -368,7 +376,15 @@ BEGIN
     INNER JOIN quests q ON p.id = q.place_id
     WHERE q.is_active = TRUE
         AND p.is_active = TRUE
-    HAVING distance_km <= radius_km
+        AND (
+            6371 * ACOS(
+                COS(RADIANS(lat)) *
+                COS(RADIANS(p.latitude)) *
+                COS(RADIANS(p.longitude) - RADIANS(lon)) +
+                SIN(RADIANS(lat)) *
+                SIN(RADIANS(p.latitude))
+            )
+        ) <= radius_km
     ORDER BY distance_km
     LIMIT limit_count;
 END;
