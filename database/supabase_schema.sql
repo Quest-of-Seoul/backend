@@ -205,6 +205,8 @@ CREATE TABLE IF NOT EXISTS chat_logs (
     function_type VARCHAR(50) DEFAULT 'rag_chat' CHECK (function_type IN ('rag_chat', 'vlm_chat', 'route_recommend', 'image_similarity')),
     image_url TEXT,
     chat_session_id UUID,
+    title TEXT,
+    is_read_only BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -691,6 +693,8 @@ COMMENT ON COLUMN chat_logs.mode IS '채팅 모드: explore(탐색 모드), ques
 COMMENT ON COLUMN chat_logs.function_type IS '기능 타입: rag_chat(일반 RAG 채팅), vlm_chat(VLM 채팅), route_recommend(경로 추천), image_similarity(이미지 유사도)';
 COMMENT ON COLUMN chat_logs.image_url IS '이미지 URL (퀘스트 모드 VLM 채팅용)';
 COMMENT ON COLUMN chat_logs.chat_session_id IS '채팅 세션 ID (같은 대화를 묶는 UUID)';
+COMMENT ON COLUMN chat_logs.title IS '채팅 세션 제목 (일반 채팅: 첫 질문, 여행 일정: 테마)';
+COMMENT ON COLUMN chat_logs.is_read_only IS '읽기 전용 여부 (여행 일정은 true)';
 COMMENT ON TABLE vlm_logs IS 'VLM 이미지 분석 로그';
 
 -- Column Comments for places table

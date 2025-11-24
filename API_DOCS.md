@@ -66,12 +66,13 @@ Production: `https://your-domain.com`
 - POST `/map/stats/walk-distance` - 선택한 퀘스트 루트의 총 거리 계산
 
 ### AI Station (AI Station 통합 기능)
-- GET `/ai-station/chat-list` - 채팅 리스트 조회 (모드별, 기능별)
-- POST `/ai-station/explore/rag-chat` - 탐색 모드 RAG 채팅 (텍스트만 저장)
-- POST `/ai-station/quest/rag-chat` - 퀘스트 모드 RAG 채팅
-- POST `/ai-station/quest/vlm-chat` - 퀘스트 모드 VLM 채팅 (이미지+텍스트 저장)
+- GET `/ai-station/chat-list` - 채팅 리스트 조회 (일반 채팅, 여행 일정만)
+- GET `/ai-station/chat-session/{session_id}` - 특정 세션의 채팅 내역 조회
+- POST `/ai-station/explore/rag-chat` - 일반 채팅 (히스토리 저장, 첫 질문이 제목)
+- POST `/ai-station/quest/rag-chat` - 퀘스트 모드 RAG 채팅 (히스토리 저장 안 함)
+- POST `/ai-station/quest/vlm-chat` - 퀘스트 모드 VLM 채팅 (히스토리 저장 안 함)
 - POST `/ai-station/stt-tts` - STT + TTS 통합 (음성 입력 → 텍스트 → 음성 출력)
-- POST `/ai-station/route-recommend` - 여행지 경로 추천 (4개 퀘스트 추천)
+- POST `/ai-station/route-recommend` - 여행 일정 추천 (히스토리 저장, 보기 전용, 테마가 제목)
 
 ---
 
@@ -1502,14 +1503,13 @@ VLM 서비스 상태 확인
 ### GET /ai-station/chat-list
 
 채팅 리스트 조회 (하프 모달용)
+일반 채팅(rag_chat)과 여행 일정(route_recommend)만 반환
 
 **Query Parameters:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | user_id | string | 필수 | 사용자 ID |
-| mode | string | 선택 | 모드 필터 (explore/quest) |
-| function_type | string | 선택 | 기능 타입 필터 (rag_chat/vlm_chat/route_recommend/image_similarity) |
 | limit | integer | 선택 | 결과 개수 (기본: 20) |
 
 **Response:**
@@ -1520,12 +1520,12 @@ VLM 서비스 상태 확인
   "sessions": [
     {
       "session_id": "uuid",
-      "mode": "explore",
       "function_type": "rag_chat",
-      "landmark": "경복궁",
+      "title": "근정전에 대해 알려줘",
+      "is_read_only": false,
       "created_at": "2024-01-01T12:00:00Z",
       "updated_at": "2024-01-01T12:00:00Z",
-      "preview": "근정전에 대해 알려줘",
+      "time_ago": "5분전",
       "chats": [
         {
           "id": 1,
@@ -1534,9 +1534,72 @@ VLM 서비스 상태 확인
           "created_at": "2024-01-01T12:00:00Z"
         }
       ]
+    },
+    {
+      "session_id": "uuid-2",
+      "function_type": "route_recommend",
+      "title": "역사유적 탐방",
+      "is_read_only": true,
+      "created_at": "2024-01-01T10:00:00Z",
+      "updated_at": "2024-01-01T10:00:00Z",
+      "time_ago": "01월 01일",
+      "chats": []
     }
   ],
-  "count": 1
+  "count": 2
+}
+```
+
+**Notes:**
+- `title`: 일반 채팅은 첫 번째 질문, 여행 일정은 테마
+- `is_read_only`: 여행 일정은 true (수정 불가)
+- `time_ago`: "방금", "5분전", "2시간전", "01월 01일" 형식
+
+---
+
+### GET /ai-station/chat-session/{session_id}
+
+특정 세션의 채팅 내역 조회
+
+**Path Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| session_id | string | 필수 | 세션 ID |
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| user_id | string | 필수 | 사용자 ID |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "session": {
+    "session_id": "uuid",
+    "function_type": "rag_chat",
+    "title": "근정전에 대해 알려줘",
+    "is_read_only": false,
+    "created_at": "2024-01-01T12:00:00Z"
+  },
+  "chats": [
+    {
+      "id": 1,
+      "user_message": "근정전에 대해 알려줘",
+      "ai_response": "근정전은 경복궁의 정전으로...",
+      "created_at": "2024-01-01T12:00:00Z"
+    },
+    {
+      "id": 2,
+      "user_message": "그럼 사정전은?",
+      "ai_response": "사정전은...",
+      "created_at": "2024-01-01T12:05:00Z"
+    }
+  ],
+  "count": 2
 }
 ```
 
@@ -1544,7 +1607,9 @@ VLM 서비스 상태 확인
 
 ### POST /ai-station/explore/rag-chat
 
-탐색 모드 - 일반 RAG 채팅 (텍스트만 저장)
+일반 채팅 (히스토리 저장)
+- 첫 번째 질문이 세션 제목으로 사용됨
+- 다시 들어와서 이어서 대화 가능
 
 **Request Body:**
 
@@ -1571,11 +1636,17 @@ VLM 서비스 상태 확인
 }
 ```
 
+**Notes:**
+- `chat_session_id`가 없으면 새 세션 생성
+- `chat_session_id`가 있으면 기존 세션에 추가
+- 첫 번째 메시지일 경우 `user_message`가 세션 제목으로 저장됨
+
 ---
 
 ### POST /ai-station/quest/rag-chat
 
 퀘스트 모드 - 일반 RAG 채팅
+**히스토리에 저장하지 않음** (이미지와 퀘스트 정보 포함)
 
 **Request Body:**
 
@@ -1607,7 +1678,8 @@ VLM 서비스 상태 확인
 
 ### POST /ai-station/quest/vlm-chat
 
-퀘스트 모드 - VLM 채팅 (이미지+텍스트 저장)
+퀘스트 모드 - VLM 채팅
+**히스토리에 저장하지 않음** (이미지와 퀘스트 정보 포함)
 
 **Request Body:**
 
@@ -1672,7 +1744,10 @@ STT + TTS 통합 엔드포인트
 
 ### POST /ai-station/route-recommend
 
-여행지 경로 추천 (4개 퀘스트 추천)
+여행 일정 추천 (4개 퀘스트 추천)
+- 히스토리에 저장됨 (보기 전용)
+- 테마가 세션 제목으로 사용됨
+- 다시 들어와서 수정 불가, 보기만 가능
 
 **Request Body:**
 
@@ -1680,6 +1755,7 @@ STT + TTS 통합 엔드포인트
 {
   "user_id": "user-123",
   "preferences": {
+    "theme": "역사유적 탐방",
     "category": "역사유적",
     "difficulty": "easy",
     "duration": "half_day"
@@ -1711,6 +1787,10 @@ STT + TTS 통합 엔드포인트
   "session_id": "uuid"
 }
 ```
+
+**Notes:**
+- `preferences.theme` 또는 `preferences.category`가 세션 제목으로 사용됨
+- `is_read_only: true`로 저장되어 수정 불가
 
 ---
 

@@ -71,45 +71,92 @@ class RouteRecommendRequest(BaseModel):
     longitude: Optional[float] = None
 
 
+def format_time_ago(created_at_str: str) -> str:
+    """시간을 '몇분전' 또는 '몇월 며칠' 형식으로 변환"""
+    try:
+        from datetime import datetime, timezone, timedelta
+        
+        # 문자열을 datetime으로 변환
+        if isinstance(created_at_str, str):
+            # ISO 형식 문자열 파싱
+            if 'T' in created_at_str:
+                dt_str = created_at_str.replace('Z', '+00:00')
+                if '+' in dt_str or dt_str.endswith('+00:00'):
+                    dt = datetime.fromisoformat(dt_str)
+                else:
+                    dt = datetime.fromisoformat(dt_str)
+                    dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = datetime.fromisoformat(created_at_str)
+                dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = created_at_str
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        
+        # UTC를 KST로 변환 (UTC+9)
+        kst_offset = timedelta(hours=9)
+        dt_kst = dt.astimezone(timezone(kst_offset))
+        
+        now = datetime.now(timezone(kst_offset))
+        diff = now - dt_kst
+        
+        # 몇분전
+        if diff.total_seconds() < 3600:  # 1시간 미만
+            minutes = int(diff.total_seconds() / 60)
+            if minutes < 1:
+                return "방금"
+            return f"{minutes}분전"
+        
+        # 몇시간전
+        if diff.total_seconds() < 86400:  # 24시간 미만
+            hours = int(diff.total_seconds() / 3600)
+            return f"{hours}시간전"
+        
+        # 몇월 며칠
+        return dt_kst.strftime("%m월 %d일")
+    
+    except Exception as e:
+        logger.warning(f"Time formatting error: {e}")
+        return ""
+
+
 @router.get("/chat-list")
 async def get_chat_list(
     user_id: str,
-    mode: Optional[str] = None,
-    function_type: Optional[str] = None,
     limit: int = 20
 ):
     """
     채팅 리스트 조회 (하프 모달용)
-    모드별, 기능별로 채팅 기록을 그룹화하여 반환
+    일반 채팅(rag_chat)과 여행 일정(route_recommend)만 반환
     """
     try:
         db = get_db()
         
-        query = db.table("chat_logs").select("*").eq("user_id", user_id)
-        
-        if mode:
-            query = query.eq("mode", mode)
-        if function_type:
-            query = query.eq("function_type", function_type)
-        
-        result = query.order("created_at", desc=True).limit(limit).execute()
+        # 일반 채팅과 여행 일정만 조회
+        result = db.table("chat_logs").select("*").eq("user_id", user_id).in_("function_type", ["rag_chat", "route_recommend"]).order("created_at", desc=True).limit(limit * 10).execute()
         
         # 세션별로 그룹화
         sessions = {}
         for chat in result.data:
             session_id = chat.get("chat_session_id")
             if not session_id:
-                session_id = str(chat.get("id"))
+                continue  # 세션 ID가 없으면 스킵
             
             if session_id not in sessions:
+                # 제목: title 필드가 있으면 사용, 없으면 첫 질문 사용
+                title = chat.get("title")
+                if not title and chat.get("user_message"):
+                    title = chat.get("user_message", "")[:50]
+                
                 sessions[session_id] = {
                     "session_id": session_id,
-                    "mode": chat.get("mode", "explore"),
                     "function_type": chat.get("function_type", "rag_chat"),
-                    "landmark": chat.get("landmark"),
+                    "title": title or "",
+                    "is_read_only": chat.get("is_read_only", False),
                     "created_at": chat.get("created_at"),
                     "updated_at": chat.get("created_at"),
-                    "preview": chat.get("user_message", "")[:50] if chat.get("user_message") else "",
+                    "time_ago": format_time_ago(chat.get("created_at")),
                     "chats": []
                 }
             
@@ -123,10 +170,12 @@ async def get_chat_list(
             # 최신 업데이트 시간 갱신
             if chat.get("created_at") > sessions[session_id]["updated_at"]:
                 sessions[session_id]["updated_at"] = chat.get("created_at")
+                sessions[session_id]["time_ago"] = format_time_ago(chat.get("created_at"))
         
         # 세션 리스트로 변환 (최신순)
         session_list = list(sessions.values())
         session_list.sort(key=lambda x: x["updated_at"], reverse=True)
+        session_list = session_list[:limit]  # 최종 limit 적용
         
         logger.info(f"Retrieved {len(session_list)} chat sessions for user: {user_id}")
         
@@ -139,6 +188,56 @@ async def get_chat_list(
     except Exception as e:
         logger.error(f"Chat list error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching chat list: {str(e)}")
+
+
+@router.get("/chat-session/{session_id}")
+async def get_chat_session(session_id: str, user_id: str):
+    """
+    특정 세션의 채팅 내역 조회
+    사용자가 히스토리에서 세션을 클릭했을 때 전체 대화 내용을 반환
+    """
+    try:
+        db = get_db()
+        
+        result = db.table("chat_logs").select("*").eq("chat_session_id", session_id).eq("user_id", user_id).order("created_at", asc=True).execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # 세션 정보
+        first_chat = result.data[0]
+        session_info = {
+            "session_id": session_id,
+            "function_type": first_chat.get("function_type", "rag_chat"),
+            "title": first_chat.get("title", ""),
+            "is_read_only": first_chat.get("is_read_only", False),
+            "created_at": first_chat.get("created_at")
+        }
+        
+        # 채팅 목록
+        chats = []
+        for chat in result.data:
+            chats.append({
+                "id": chat.get("id"),
+                "user_message": chat.get("user_message"),
+                "ai_response": chat.get("ai_response"),
+                "created_at": chat.get("created_at")
+            })
+        
+        logger.info(f"Retrieved {len(chats)} chats for session: {session_id}")
+        
+        return {
+            "success": True,
+            "session": session_info,
+            "chats": chats,
+            "count": len(chats)
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chat session error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 @router.post("/explore/rag-chat")
@@ -207,14 +306,24 @@ async def explore_rag_chat(request: ExploreRAGChatRequest):
                 logger.warning(f"TTS generation failed: {tts_error}")
         
         # 채팅 기록 저장 (텍스트만)
+        # 첫 번째 질문인지 확인하여 제목 설정
         try:
+            existing_session = db.table("chat_logs").select("id").eq("chat_session_id", session_id).limit(1).execute()
+            is_first_message = not existing_session.data or len(existing_session.data) == 0
+            
+            title = None
+            if is_first_message:
+                title = request.user_message[:50]  # 첫 질문을 제목으로 사용
+            
             db.table("chat_logs").insert({
                 "user_id": request.user_id,
                 "user_message": request.user_message,
                 "ai_response": ai_response,
                 "mode": "explore",
                 "function_type": "rag_chat",
-                "chat_session_id": session_id
+                "chat_session_id": session_id,
+                "title": title,
+                "is_read_only": False
             }).execute()
         except Exception as db_error:
             logger.warning(f"Failed to save chat log: {db_error}")
@@ -280,20 +389,8 @@ async def quest_rag_chat(request: QuestRAGChatRequest):
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # 채팅 기록 저장
-        try:
-            db = get_db()
-            db.table("chat_logs").insert({
-                "user_id": request.user_id,
-                "landmark": landmark,
-                "user_message": request.user_message,
-                "ai_response": ai_response,
-                "mode": "quest",
-                "function_type": "rag_chat",
-                "chat_session_id": session_id
-            }).execute()
-        except Exception as db_error:
-            logger.warning(f"Failed to save chat log: {db_error}")
+        # 퀘스트 채팅은 히스토리에 저장하지 않음
+        # (이미지와 퀘스트 정보가 포함되어 있어서 히스토리에 남기지 않기로 결정)
         
         response = {
             "success": True,
@@ -413,21 +510,8 @@ VLM 분석 결과:
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # 채팅 기록 저장 (이미지+텍스트)
-        try:
-            db = get_db()
-            db.table("chat_logs").insert({
-                "user_id": request.user_id,
-                "landmark": matched_place.get("name") if matched_place else None,
-                "user_message": request.user_message or "",
-                "ai_response": ai_response,
-                "mode": "quest",
-                "function_type": "vlm_chat",
-                "image_url": image_url,
-                "chat_session_id": session_id
-            }).execute()
-        except Exception as db_error:
-            logger.warning(f"Failed to save chat log: {db_error}")
+        # 퀘스트 채팅은 히스토리에 저장하지 않음
+        # (이미지와 퀘스트 정보가 포함되어 있어서 히스토리에 남기지 않기로 결정)
         
         response = {
             "success": True,
@@ -567,7 +651,12 @@ async def recommend_route(request: RouteRecommendRequest):
         # 세션 ID 생성
         session_id = str(uuid.uuid4())
         
-        # 채팅 기록 저장
+        # 테마 추출 (preferences에서)
+        theme = request.preferences.get("theme") or request.preferences.get("category") or "서울 여행"
+        if isinstance(theme, dict):
+            theme = theme.get("name", "서울 여행")
+        
+        # 채팅 기록 저장 (여행 일정 - 보기 전용)
         try:
             db.table("chat_logs").insert({
                 "user_id": request.user_id,
@@ -575,7 +664,9 @@ async def recommend_route(request: RouteRecommendRequest):
                 "ai_response": f"{len(recommended_quests)}개의 퀘스트를 추천했습니다.",
                 "mode": "explore",
                 "function_type": "route_recommend",
-                "chat_session_id": session_id
+                "chat_session_id": session_id,
+                "title": theme,  # 테마를 제목으로 사용
+                "is_read_only": True  # 보기 전용
             }).execute()
         except Exception as db_error:
             logger.warning(f"Failed to save chat log: {db_error}")
