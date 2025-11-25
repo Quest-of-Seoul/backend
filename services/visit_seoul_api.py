@@ -4,11 +4,148 @@ import os
 import logging
 import requests
 import time
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 VISIT_SEOUL_BASE_URL = "https://api-call.visitseoul.net/api/v1"
+CACHE_TTL_SECONDS = 60 * 60 * 24  # 24시간 캐싱
+
+_category_cache: Dict[str, Optional[List[Dict]]] = {
+    "data": None,
+    "expires_at": 0.0
+}
+_lang_code_cache: Dict[str, Optional[List[Dict]]] = {
+    "data": None,
+    "expires_at": 0.0
+}
+
+
+def _cache_expired(cache_bucket: Dict[str, Optional[List[Dict]]]) -> bool:
+    """간단한 TTL 기반 캐시 만료 여부 확인"""
+    return not cache_bucket["data"] or time.time() >= cache_bucket["expires_at"]
+
+
+def _set_cache(cache_bucket: Dict[str, Optional[List[Dict]]], data: List[Dict]) -> None:
+    """캐시 갱신"""
+    cache_bucket["data"] = data
+    cache_bucket["expires_at"] = time.time() + CACHE_TTL_SECONDS
+
+
+def normalize_category_path(path: Optional[str]) -> str:
+    """카테고리 경로 공백 제거 및 표준화"""
+    if not path:
+        return ""
+    parts = [segment.strip() for segment in path.split(">") if segment.strip()]
+    return " > ".join(parts)
+
+
+CATEGORY_DATASET_INFO: Dict[str, Dict] = {
+    "Attractions": {
+        "description": "도시의 대표 관광명소(랜드마크·테마파크·핫플 등)",
+        "total_count": 92,
+        "include_paths": [
+            "문화관광 > 랜드마크관광",
+            "문화관광 > 테마공원",
+            "문화관광 > 기타문화관광지"
+        ],
+        "include_keywords": ["랜드마크", "테마공원", "Landmark", "Theme Park"],
+        "exclude_keywords": []
+    },
+    "History": {
+        "description": "역사·유적지·궁·전통 공간",
+        "total_count": 649,
+        "include_paths": [
+            "역사관광"
+        ],
+        "include_keywords": ["역사관광", "History", "유적", "궁", "전통"],
+        "exclude_keywords": []
+    },
+    "Culture": {
+        "description": "박물관·미술관·전시·공연 등 문화시설",
+        "total_count": 599,
+        "include_paths": [
+            "문화관광 > 전시시설",
+            "문화관광 > 기타전시시설",
+            "문화관광 > 미술관/화랑",
+            "문화관광 > 박물관",
+            "축제/공연/행사 > 전시회"
+        ],
+        "include_keywords": ["전시", "미술관", "Museum", "Gallery", "Exhibition"],
+        "exclude_keywords": []
+    },
+    "Nature": {
+        "description": "공원·산·강·자연풍경",
+        "total_count": 136,
+        "include_paths": [
+            "자연관광",
+            "문화관광 > 도시공원"
+        ],
+        "include_keywords": ["자연", "공원", "Nature", "Park"],
+        "exclude_keywords": []
+    },
+    "Food": {
+        "description": "식당·길거리음식·현지 맛집 (카페/주점 제외)",
+        "total_count": 1004,
+        "include_prefixes": ["음식"],
+        "include_keywords": ["음식", "맛집", "Food", "Restaurant"],
+        "exclude_keywords": ["카페", "찻집", "Cafe", "Coffee", "주점", "Bar", "티하우스"]
+    },
+    "Drinks": {
+        "description": "카페·티하우스·바(주점)",
+        "total_count": 247,
+        "include_paths": [
+            "음식 > 카페/찻집",
+            "음식 > 주점"
+        ],
+        "include_keywords": ["카페", "Cafe", "Coffee", "주점", "Bar", "티하우스"],
+        "exclude_keywords": []
+    },
+    "Shopping": {
+        "description": "쇼핑·시장·상점가",
+        "total_count": 269,
+        "include_paths": [
+            "쇼핑"
+        ],
+        "include_keywords": ["쇼핑", "Shopping", "시장", "마켓", "Market"],
+        "exclude_keywords": []
+    },
+    "Activities": {
+        "description": "체험·클래스·액티비티",
+        "total_count": 368,
+        "include_paths": [
+            "체험관광",
+            "문화관광 > 레저스포츠시설"
+        ],
+        "include_keywords": ["체험", "Experience", "레저", "스포츠", "Leisure", "Sports"],
+        "exclude_keywords": []
+    },
+    "Events": {
+        "description": "축제·공연·행사",
+        "total_count": 183,
+        "include_paths": [
+            "축제/공연/행사 > 축제",
+            "축제/공연/행사 > 공연",
+            "축제/공연/행사 > 행사",
+            "축제/공연/행사 > 기타행사",
+            "축제/공연/행사 > 박람회"
+        ],
+        "include_keywords": ["축제", "Festival", "공연", "Performance", "행사", "Event", "박람회"],
+        "exclude_keywords": ["전시회"]  # 전시회는 Culture에 포함
+    }
+}
+
+CATEGORY_KEYWORD_FALLBACKS: Dict[str, List[str]] = {
+    "Attractions": ["랜드마크관광", "랜드마크", "Landmark", "테마공원", "Theme Park", "기타문화관광지", "핫플"],
+    "History": ["역사관광", "역사", "History", "Historic", "유적", "궁", "전통"],
+    "Culture": ["전시시설", "전시", "Exhibition", "미술관", "화랑", "Museum", "Gallery", "박물관", "기타전시시설", "전시회"],
+    "Nature": ["자연관광", "자연", "Nature", "도시공원", "공원", "Park"],
+    "Food": ["음식", "식당", "맛집", "레스토랑", "Restaurant", "Food"],
+    "Drinks": ["카페", "찻집", "Cafe", "Coffee", "티하우스", "주점", "Bar", "바"],
+    "Shopping": ["쇼핑", "Shopping", "마켓", "시장", "상점", "Market"],
+    "Activities": ["체험관광", "체험", "Experience", "레저스포츠시설", "레저", "스포츠", "Leisure", "Sports", "액티비티"],
+    "Events": ["축제", "Festival", "공연", "Performance", "행사", "Event", "기타행사", "박람회"]
+}
 
 
 def get_visit_seoul_api_key() -> str:
@@ -37,6 +174,10 @@ def get_category_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[Di
     Returns:
         카테고리 리스트
     """
+    # 캐시 데이터가 유효하면 즉시 반환
+    if not _cache_expired(_category_cache):
+        return _category_cache["data"] or []
+
     url = f"{VISIT_SEOUL_BASE_URL}/category/list"
     headers = get_api_headers()
     
@@ -51,6 +192,7 @@ def get_category_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[Di
             if data.get("result_code") == 200 and "data" in data:
                 categories = data["data"]
                 logger.info(f"Found {len(categories)} categories")
+                _set_cache(_category_cache, categories)
                 return categories
             else:
                 logger.error(f"Unexpected response: {data}")
@@ -88,112 +230,75 @@ def map_category_to_visit_seoul_sn(
     Returns:
         VISIT SEOUL category_sn (com_ctgry_sn) 리스트 또는 None
     """
-    # 카테고리 목록 가져오기
     categories = get_category_list(retry_count, retry_delay)
     if not categories:
         logger.warning(f"Could not fetch VISIT SEOUL categories, returning None for {category}")
         return None
     
-    # 카테고리별 매핑 키워드
-    # ctgry_nm 또는 ctgry_path에서 매칭
-    category_keywords = {
-        "Attractions": [
-            # 문화관광 > 랜드마크관광, 테마공원, 기타문화관광지
-            "랜드마크관광", "랜드마크", "Landmark",
-            "테마공원", "Theme Park",
-            "기타문화관광지"
-        ],
-        "History": [
-            # 역사관광
-            "역사관광", "역사", "History", "Historic", "유적", "궁", "전통"
-        ],
-        "Culture": [
-            # 문화관광 > 전시시설, 기타전시시설, 미술관/화랑, 박물관
-            # 축제/공연/행사 > 전시회
-            "전시시설", "전시", "Exhibition",
-            "미술관", "화랑", "Museum", "Gallery",
-            "박물관",
-            "기타전시시설",
-            "전시회"  # 축제/공연/행사 > 전시회
-        ],
-        "Nature": [
-            # 자연관광
-            # 문화관광 > 도시공원
-            "자연관광", "자연", "Nature",
-            "도시공원", "공원", "Park"
-        ],
-        "Food": [
-            # 음식 > 카페/찻집, 주점 제외한 모든 중분류
-            "음식", "식당", "맛집", "레스토랑", "Restaurant", "Food"
-            # 주의: "카페", "찻집", "주점"은 제외해야 함 (아래 exclude_keywords에서 처리)
-        ],
-        "Drinks": [
-            # 음식 > 카페/찻집, 주점
-            "카페", "찻집", "Cafe", "Coffee", "티하우스",
-            "주점", "Bar", "바"
-        ],
-        "Shopping": [
-            # 쇼핑
-            "쇼핑", "Shopping", "마켓", "시장", "상점", "Market"
-        ],
-        "Activities": [
-            # 체험관광
-            # 문화관광 > 레저스포츠시설
-            "체험관광", "체험", "Experience",
-            "레저스포츠시설", "레저", "스포츠", "Leisure", "Sports", "액티비티"
-        ],
-        "Events": [
-            # 축제/공연/행사 > 축제, 공연, 행사, 기타행사, 박람회
-            "축제", "Festival",
-            "공연", "Performance",
-            "행사", "Event",
-            "기타행사",
-            "박람회"
-            # 주의: "전시회"는 Culture에 포함되므로 Events에서는 제외 (하지만 키워드 매칭 시 중복 가능성 있음)
-        ]
-    }
+    category_info = CATEGORY_DATASET_INFO.get(category, {})
+    include_paths = [normalize_category_path(p) for p in category_info.get("include_paths", [])]
+    include_prefixes = [normalize_category_path(p) for p in category_info.get("include_prefixes", [])]
+    include_keywords = category_info.get("include_keywords") or CATEGORY_KEYWORD_FALLBACKS.get(category, [])
+    exclude_keywords = category_info.get("exclude_keywords", [])
     
-    keywords = category_keywords.get(category, [])
-    if not keywords:
+    if not include_paths and not include_keywords and not include_prefixes:
         logger.warning(f"Unknown category: {category}")
         return None
     
-    matched_category_sns = []
+    matched_category_sns: List[str] = []
+    matched_paths: Set[str] = set()
     
-    # 카테고리 목록에서 매칭되는 카테고리 찾기
     for cat in categories:
         ctgry_nm = cat.get("ctgry_nm", "").strip()
-        ctgry_path = cat.get("ctgry_path", "").strip()
+        ctgry_path_raw = cat.get("ctgry_path") or ctgry_nm
+        ctgry_path = normalize_category_path(ctgry_path_raw)
         category_sn = cat.get("com_ctgry_sn")
         
         if not category_sn:
             continue
         
-        # Food 카테고리는 카페/찻집, 주점 제외
-        if category == "Food":
-            exclude_keywords = ["카페", "찻집", "주점", "Cafe", "Coffee", "Bar", "바", "티하우스"]
-            if any(exclude in ctgry_nm or exclude in ctgry_path for exclude in exclude_keywords):
-                continue
+        # 제외 키워드 우선 체크
+        if any(ex_keyword in ctgry_nm or ex_keyword in ctgry_path for ex_keyword in exclude_keywords):
+            continue
         
-        # Events 카테고리는 전시회 제외 (전시회는 Culture에 포함)
-        if category == "Events":
-            if "전시회" in ctgry_nm or "전시회" in ctgry_path:
-                continue
+        # 포함 조건 평가
+        path_match = ctgry_path in include_paths if include_paths else False
+        prefix_match = any(
+            ctgry_path.startswith(prefix)
+            for prefix in include_prefixes
+            if prefix
+        ) if include_prefixes else False
+        keyword_match = any(
+            keyword in ctgry_nm or keyword in ctgry_path
+            for keyword in include_keywords
+        ) if include_keywords else False
         
-        # ctgry_nm 또는 ctgry_path에 키워드가 포함되어 있는지 확인
-        for keyword in keywords:
-            if keyword in ctgry_nm or keyword in ctgry_path:
-                if category_sn not in matched_category_sns:
-                    matched_category_sns.append(str(category_sn))
-                    logger.debug(f"Matched category '{category}' with VISIT SEOUL category_sn '{category_sn}' (name: {ctgry_nm}, path: {ctgry_path})")
-                break
+        if not (path_match or prefix_match or keyword_match):
+            continue
+        
+        sn_str = str(category_sn)
+        if sn_str not in matched_category_sns:
+            matched_category_sns.append(sn_str)
+            matched_paths.add(ctgry_path)
+            logger.debug(
+                "Matched category '%s' with VISIT SEOUL category_sn '%s' (name: %s, path: %s)",
+                category,
+                sn_str,
+                ctgry_nm,
+                ctgry_path
+            )
     
     if matched_category_sns:
-        logger.info(f"Mapped category '{category}' to {len(matched_category_sns)} VISIT SEOUL category_sn(s): {matched_category_sns}")
+        logger.info(
+            "Mapped category '%s' to %d VISIT SEOUL category_sn(s): %s",
+            category,
+            len(matched_category_sns),
+            matched_category_sns
+        )
         return matched_category_sns
-    else:
-        logger.warning(f"Could not find matching VISIT SEOUL category for category: {category}")
-        return None
+    
+    logger.warning(f"Could not find matching VISIT SEOUL category for category: {category}")
+    return None
 
 
 def get_lang_code_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[Dict]:
@@ -207,6 +312,9 @@ def get_lang_code_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[D
     Returns:
         언어 코드 리스트
     """
+    if not _cache_expired(_lang_code_cache):
+        return _lang_code_cache["data"] or []
+
     url = f"{VISIT_SEOUL_BASE_URL}/code/lang"
     headers = get_api_headers()
     
@@ -221,6 +329,7 @@ def get_lang_code_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[D
             if data.get("result_code") == 200 and "data" in data:
                 lang_codes = data["data"]
                 logger.info(f"Found {len(lang_codes)} language codes")
+                _set_cache(_lang_code_cache, lang_codes)
                 return lang_codes
             else:
                 logger.error(f"Unexpected response: {data}")
@@ -403,6 +512,19 @@ def parse_visit_seoul_place(item: Dict, detail: Optional[Dict] = None) -> Dict:
     """
     # detail이 있으면 detail 사용, 없으면 item 사용
     data = detail if detail else item
+    lang_code_id = data.get("lang_code_id") or item.get("lang_code_id")
+    cate_depth_raw = data.get("cate_depth") or item.get("cate_depth") or []
+    cate_depth = [
+        depth.strip()
+        for depth in cate_depth_raw
+        if isinstance(depth, str) and depth.strip()
+    ] if isinstance(cate_depth_raw, list) else []
+    tags = []
+    multi_lang_list = data.get("multi_lang_list") or item.get("multi_lang_list")
+    schedule = {}
+    traffic_data: Dict = {}
+    extra_data: Dict = {}
+    tourist_data: Dict = {}
     
     # 디버깅: 원본 데이터 로깅
     cid = data.get("cid") or item.get("cid")
@@ -414,30 +536,43 @@ def parse_visit_seoul_place(item: Dict, detail: Optional[Dict] = None) -> Dict:
     latitude = None
     longitude = None
     
-    if detail and "traffic" in detail:
-        traffic = detail["traffic"]
-        if traffic.get("map_position_y"):
+    if detail and detail.get("traffic"):
+        traffic_data = detail.get("traffic") or {}
+        if traffic_data.get("map_position_y"):
             try:
-                latitude = float(traffic["map_position_y"])
+                latitude = float(traffic_data["map_position_y"])
             except (ValueError, TypeError):
                 pass
-        if traffic.get("map_position_x"):
+        if traffic_data.get("map_position_x"):
             try:
-                longitude = float(traffic["map_position_x"])
+                longitude = float(traffic_data["map_position_x"])
             except (ValueError, TypeError):
                 pass
     
     # 주소 추출 (traffic.new_adres 우선, 없으면 adres)
     address = None
-    if detail and "traffic" in detail:
-        traffic = detail["traffic"]
-        address = traffic.get("new_adres") or traffic.get("adres")
+    if traffic_data:
+        address = traffic_data.get("new_adres") or traffic_data.get("adres")
     
     # 이미지 URL
     image_url = None
     images = []
     
     if detail:
+        detail_tags = detail.get("tag") or []
+        if isinstance(detail_tags, list):
+            tags = [tag for tag in detail_tags if isinstance(tag, str)]
+        elif detail_tags:
+            tags = [str(detail_tags)]
+        
+        schedule = {
+            "start_date": detail.get("schdul_info_bgnde"),
+            "end_date": detail.get("schdul_info_endde")
+        }
+        
+        extra_data = detail.get("extra") or {}
+        tourist_data = detail.get("tourist") or {}
+        
         if detail.get("main_img"):
             image_url = detail["main_img"]
             images.append(detail["main_img"])
@@ -467,39 +602,38 @@ def parse_visit_seoul_place(item: Dict, detail: Optional[Dict] = None) -> Dict:
         overview = detail.get("post_desc") or detail.get("sumry")
         content = overview  # content는 overview와 동일하게 사용
         
-        if "extra" in detail:
-            extra = detail["extra"]
-            homepage = extra.get("cmmn_hmpg_url")
-            tel = extra.get("cmmn_telno")
-            tip = extra.get("cmmn_tip") or extra.get("tip")
+        if extra_data:
+            homepage = extra_data.get("cmmn_hmpg_url")
+            tel = extra_data.get("cmmn_telno")
+            tip = extra_data.get("cmmn_tip") or extra_data.get("tip")
             
-            logger.debug(f"Extra keys: {list(extra.keys()) if extra else 'None'}")
+            logger.debug(f"Extra keys: {list(extra_data.keys()) if extra_data else 'None'}")
             logger.debug(f"Homepage: {homepage}, Tel: {tel}, Tip: {tip}")
             
             # detail_info 구성 (API 응답 구조에 맞게)
             detail_info = {
-                "opening_hours": extra.get("cmmn_use_time") or "",
-                "closed_days": extra.get("closed_days") or "",
-                "business_days": extra.get("business_days") or extra.get("cmmn_business_days") or "",
+                "opening_hours": extra_data.get("cmmn_use_time") or "",
+                "closed_days": extra_data.get("closed_days") or "",
+                "business_days": extra_data.get("business_days") or extra_data.get("cmmn_business_days") or "",
                 "tel": tel or "",
-                "traffic_info": detail.get("traffic", {}).get("subway_info") or "" if detail and "traffic" in detail else "",
+                "traffic_info": traffic_data.get("subway_info") or "" if traffic_data else "",
                 "homepage": homepage or "",
-                "important": extra.get("cmmn_important") or "",
-                "admission_fee": extra.get("trrsrt_use_chrge") or "",  # F: 무료, C: 유료
-                "admission_fee_guidance": extra.get("trrsrt_use_chrge_guidance") or "",
-                "disabled_facility": extra.get("disabled_facility") or []
+                "important": extra_data.get("cmmn_important") or "",
+                "admission_fee": extra_data.get("trrsrt_use_chrge") or "",  # F: 무료, C: 유료
+                "admission_fee_guidance": extra_data.get("trrsrt_use_chrge_guidance") or "",
+                "disabled_facility": extra_data.get("disabled_facility") or []
             }
             
             # 이용안내 조합
             usage_info_parts = []
-            if extra.get("cmmn_use_time"):
-                usage_info_parts.append(f"이용시간: {extra['cmmn_use_time']}")
-            if extra.get("closed_days"):
-                usage_info_parts.append(f"휴무일: {extra['closed_days']}")
-            if extra.get("trrsrt_use_chrge_guidance"):
-                usage_info_parts.append(f"이용요금: {extra['trrsrt_use_chrge_guidance']}")
-            if extra.get("cmmn_important"):
-                usage_info_parts.append(f"이것만은 꼭!: {extra['cmmn_important']}")
+            if extra_data.get("cmmn_use_time"):
+                usage_info_parts.append(f"이용시간: {extra_data['cmmn_use_time']}")
+            if extra_data.get("closed_days"):
+                usage_info_parts.append(f"휴무일: {extra_data['closed_days']}")
+            if extra_data.get("trrsrt_use_chrge_guidance"):
+                usage_info_parts.append(f"이용요금: {extra_data['trrsrt_use_chrge_guidance']}")
+            if extra_data.get("cmmn_important"):
+                usage_info_parts.append(f"이것만은 꼭!: {extra_data['cmmn_important']}")
             
             usage_info = "\n".join(usage_info_parts) if usage_info_parts else None
         else:
@@ -519,6 +653,14 @@ def parse_visit_seoul_place(item: Dict, detail: Optional[Dict] = None) -> Dict:
         "content_type_id": None,  # VISIT SEOUL은 content_type_id를 사용하지 않음
         "name": data.get("post_sj") or item.get("post_sj"),
         "category": category_sn,  # com_ctgry_sn
+        "lang_code_id": lang_code_id,
+        "cate_depth": cate_depth,
+        "multi_lang_list": multi_lang_list,
+        "tags": tags,
+        "schedule": schedule,
+        "traffic": traffic_data,
+        "extra": extra_data,
+        "tourist": tourist_data,
         "address": address,
         "latitude": latitude,
         "longitude": longitude,
@@ -545,7 +687,7 @@ def parse_visit_seoul_place(item: Dict, detail: Optional[Dict] = None) -> Dict:
 def collect_all_places_by_category(
     category_sn: Optional[str] = None,
     lang_code_id: str = "ko",
-    max_places: int = 50,
+    max_places: Optional[int] = None,
     delay_between_pages: float = 0.5
 ) -> List[Dict]:
     """
@@ -560,13 +702,15 @@ def collect_all_places_by_category(
     Returns:
         수집된 장소 리스트
     """
-    all_places = []
+    all_places: List[Dict] = []
+    seen_cids: Set[str] = set()
     page_no = 1
+    limit_desc = max_places if max_places else "ALL"
     
     category_desc = category_sn if category_sn else "all categories"
-    logger.info(f"Starting VISIT SEOUL collection for category: {category_desc}, max_places: {max_places}")
+    logger.info(f"Starting VISIT SEOUL collection for category: {category_desc}, target: {limit_desc}")
     
-    while len(all_places) < max_places:
+    while True:
         result = search_places_by_category(
             category=category_sn,
             lang_code_id=lang_code_id,
@@ -580,19 +724,39 @@ def collect_all_places_by_category(
             logger.info(f"No more places found at page {page_no}")
             break
         
-        all_places.extend(places)
-        logger.info(f"Collected {len(all_places)} places so far (page {page_no}, total: {paging.get('total_count', 0)})")
-        
-        # 페이지 크기 확인
         page_size = paging.get("page_size", 50)
-        total_count = paging.get("total_count", 0)
+        total_count = paging.get("total_count")
         
-        if len(places) < page_size or len(all_places) >= total_count:
-            # 마지막 페이지
+        for place in places:
+            cid = (
+                place.get("cid")
+                or place.get("contentId")
+                or place.get("content_id")
+                or place.get("id")
+            )
+            if cid and cid in seen_cids:
+                continue
+            
+            if cid:
+                seen_cids.add(cid)
+            
+            all_places.append(place)
+            
+            if max_places and len(all_places) >= max_places:
+                logger.info(f"Reached requested max_places ({max_places}) for category {category_desc}")
+                return all_places
+        
+        logger.info(
+            "Collected %d places so far (page %d, total reported: %s)",
+            len(all_places),
+            page_no,
+            total_count if total_count is not None else "unknown"
+        )
+        
+        if not places or len(places) < page_size:
             break
         
-        if len(all_places) >= max_places:
-            all_places = all_places[:max_places]
+        if total_count is not None and len(all_places) >= total_count:
             break
         
         page_no += 1

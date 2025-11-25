@@ -9,6 +9,49 @@ logger = logging.getLogger(__name__)
 
 supabase_client = None
 
+DISTRICT_QUEST_POINTS: Dict[str, int] = {
+    # 200 포인트권 (주요 상권)
+    "강남구": 200, "Gangnam-gu": 200,
+    "광진구": 200, "Gwangjin-gu": 200,
+    "마포구": 200, "Mapo-gu": 200,
+    "서초구": 200, "Seocho-gu": 200,
+    "송파구": 200, "Songpa-gu": 200,
+    "용산구": 200, "Yongsan-gu": 200,
+    "종로구": 200, "Jongno-gu": 200,
+    "중구": 200, "Jung-gu": 200,
+    # 250 포인트권
+    "동대문구": 250, "Dongdaemun-gu": 250,
+    "동작구": 250, "Dongjak-gu": 250,
+    "서대문구": 250, "Seodaemun-gu": 250,
+    "성동구": 250, "Seongdong-gu": 250,
+    "영등포구": 250, "Yeongdeungpo-gu": 250,
+    # 300 포인트권
+    "강동구": 300, "Gangdong-gu": 300,
+    "강서구": 300, "Gangseo-gu": 300,
+    "관악구": 300, "Gwanak-gu": 300,
+    "노원구": 300, "Nowon-gu": 300,
+    "성북구": 300, "Seongbuk-gu": 300,
+    "양천구": 300, "Yangcheon-gu": 300,
+    "중랑구": 300, "Jungnang-gu": 300,
+    # 350 포인트권
+    "구로구": 350, "Guro-gu": 350,
+    # 400 포인트권 (비주류/숨겨진 지역)
+    "강북구": 400, "Gangbuk-gu": 400,
+    "금천구": 400, "Geumcheon-gu": 400,
+    "도봉구": 400, "Dobong-gu": 400,
+    "은평구": 400, "Eunpyeong-gu": 400,
+}
+
+DEFAULT_QUEST_POINTS = 300
+
+
+def get_points_for_district(district: Optional[str]) -> int:
+    """자치구 기준 포인트 산정"""
+    if not district:
+        return DEFAULT_QUEST_POINTS
+    normalized = district.strip()
+    return DISTRICT_QUEST_POINTS.get(normalized, DEFAULT_QUEST_POINTS)
+
 
 def get_supabase() -> Client:
     url = os.getenv("SUPABASE_URL")
@@ -282,6 +325,13 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
             return None
         
         # 퀘스트 데이터 준비
+        quest_points = get_points_for_district(place.get("district"))
+        logger.info(
+            "Calculated quest points for place %s (district: %s): %d",
+            place_id,
+            place.get("district"),
+            quest_points
+        )
         quest_insert = {
             "place_id": place_id,
             "name": place.get("name"),
@@ -290,8 +340,8 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
             "category": place.get("category"),
             "latitude": float(place.get("latitude")),
             "longitude": float(place.get("longitude")),
-            "reward_point": 100,
-            "points": 10,
+            "reward_point": quest_points,
+            "points": quest_points,
             "difficulty": "easy",
             "is_active": True
         }
