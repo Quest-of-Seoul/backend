@@ -2,14 +2,14 @@
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import base64
 import uuid
 import logging
 from datetime import datetime
 
 from services.ai import generate_docent_message
-from services.db import get_db
+from services.db import get_db, ensure_user_exists
 from services.embedding import generate_text_embedding
 from services.pinecone_store import search_similar_pinecone
 from services.stt import speech_to_text_from_base64, speech_to_text
@@ -38,6 +38,7 @@ class ExploreRAGChatRequest(BaseModel):
 
 class QuestRAGChatRequest(BaseModel):
     user_id: str
+    quest_id: int
     user_message: str
     landmark: Optional[str] = None
     language: str = "ko"
@@ -48,6 +49,7 @@ class QuestRAGChatRequest(BaseModel):
 
 class QuestVLMChatRequest(BaseModel):
     user_id: str
+    quest_id: int
     image: str  # base64
     user_message: Optional[str] = None
     language: str = "ko"
@@ -121,10 +123,49 @@ def format_time_ago(created_at_str: str) -> str:
         return ""
 
 
+def fetch_quest_context(quest_id: int, db=None) -> Dict[str, Any]:
+    """Fetch quest and associated place metadata for quest mode chat."""
+    db = db or get_db()
+    quest_result = db.table("quests").select("*, places(*)").eq("id", quest_id).single().execute()
+    if not quest_result.data:
+        raise HTTPException(status_code=404, detail="Quest not found")
+
+    quest = dict(quest_result.data)
+    place = quest.pop("places", None)
+    if isinstance(place, list) and place:
+        place = place[0]
+    if place:
+        quest["place"] = place
+    return quest
+
+
+def build_quest_context_block(quest: Dict[str, Any]) -> str:
+    """Build structured context text for LLM prompts."""
+    place = quest.get("place") or {}
+    lines = [
+        f"퀘스트 장소: {quest.get('name') or place.get('name', '')}",
+    ]
+    if place.get("address"):
+        lines.append(f"주소: {place['address']}")
+    if place.get("district"):
+        lines.append(f"행정구역: {place['district']}")
+    if place.get("category") or quest.get("category"):
+        lines.append(f"카테고리: {quest.get('category') or place.get('category')}")
+    if quest.get("reward_point"):
+        lines.append(f"획득 포인트: {quest['reward_point']}점")
+    if quest.get("description"):
+        lines.append(f"장소 설명: {quest['description']}")
+    elif place.get("description"):
+        lines.append(f"장소 설명: {place['description']}")
+    return "\n".join(lines)
+
+
 @router.get("/chat-list")
 async def get_chat_list(
     user_id: str,
-    limit: int = 20
+    limit: int = 20,
+    mode: Optional[str] = None,
+    function_type: Optional[str] = None
 ):
     """
     채팅 리스트 조회 (하프 모달용)
@@ -133,8 +174,15 @@ async def get_chat_list(
     try:
         db = get_db()
         
-        # 일반 채팅과 여행 일정만 조회
-        result = db.table("chat_logs").select("*").eq("user_id", user_id).in_("function_type", ["rag_chat", "route_recommend"]).order("created_at", desc=True).limit(limit * 10).execute()
+        query = db.table("chat_logs").select("*").eq("user_id", user_id)
+        if mode:
+            query = query.eq("mode", mode)
+        if function_type:
+            query = query.eq("function_type", function_type)
+        else:
+            query = query.in_("function_type", ["rag_chat", "route_recommend", "vlm_chat"])
+
+        result = query.order("created_at", desc=True).limit(limit * 10).execute()
         
         # 세션별로 그룹화
         sessions = {}
@@ -152,6 +200,7 @@ async def get_chat_list(
                 sessions[session_id] = {
                     "session_id": session_id,
                     "function_type": chat.get("function_type", "rag_chat"),
+                    "mode": chat.get("mode", "explore"),
                     "title": title or "",
                     "is_read_only": chat.get("is_read_only", False),
                     "created_at": chat.get("created_at"),
@@ -209,6 +258,7 @@ async def get_chat_session(session_id: str, user_id: str):
         session_info = {
             "session_id": session_id,
             "function_type": first_chat.get("function_type", "rag_chat"),
+            "mode": first_chat.get("mode", "explore"),
             "title": first_chat.get("title", ""),
             "is_read_only": first_chat.get("is_read_only", False),
             "created_at": first_chat.get("created_at")
@@ -352,18 +402,27 @@ async def quest_rag_chat(request: QuestRAGChatRequest):
     퀘스트 모드 - 일반 RAG 채팅 (이미지+텍스트 저장 가능)
     """
     try:
-        logger.info(f"Quest RAG chat: {request.user_id}, landmark: {request.landmark}")
-        
-        session_id = request.chat_session_id
-        if not session_id:
-            session_id = str(uuid.uuid4())
-        
-        # 장소 정보 기반 RAG 채팅
-        landmark = request.landmark or "현재 위치"
+        if not request.quest_id:
+            raise HTTPException(status_code=400, detail="quest_id is required for quest chat")
+
+        logger.info(f"Quest RAG chat: user={request.user_id}, quest={request.quest_id}")
+        db = get_db()
+        ensure_user_exists(request.user_id)
+        quest = fetch_quest_context(request.quest_id, db=db)
+
+        session_id = request.chat_session_id or str(uuid.uuid4())
+
+        landmark = quest.get("name") or quest.get("title") or request.landmark or "퀘스트 장소"
+        context_block = build_quest_context_block(quest)
+        user_prompt = f"""다음은 사용자가 진행 중인 퀘스트 장소에 대한 정보입니다:
+{context_block}
+
+위 정보를 참고해 아래 질문에 답해주세요.
+질문: {request.user_message}"""
         
         ai_response = generate_docent_message(
             landmark=landmark,
-            user_message=request.user_message,
+            user_message=user_prompt,
             language=request.language
         )
         
@@ -389,14 +448,32 @@ async def quest_rag_chat(request: QuestRAGChatRequest):
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # 퀘스트 채팅은 히스토리에 저장하지 않음
-        # (이미지와 퀘스트 정보가 포함되어 있어서 히스토리에 남기지 않기로 결정)
+        # 퀘스트 채팅도 히스토리에 저장 (조회 전용)
+        try:
+            existing_session = db.table("chat_logs").select("id").eq("chat_session_id", session_id).limit(1).execute()
+            is_first_message = not existing_session.data
+            title_value = quest.get("name") or quest.get("title") or landmark
+            
+            db.table("chat_logs").insert({
+                "user_id": request.user_id,
+                "user_message": request.user_message,
+                "ai_response": ai_response,
+                "mode": "quest",
+                "function_type": "rag_chat",
+                "chat_session_id": session_id,
+                "title": title_value if is_first_message else None,
+                "landmark": landmark,
+                "is_read_only": True
+            }).execute()
+        except Exception as db_error:
+            logger.warning(f"Failed to save quest chat log: {db_error}")
         
         response = {
             "success": True,
             "message": ai_response,
             "landmark": landmark,
-            "session_id": session_id
+            "session_id": session_id,
+            "quest_id": request.quest_id
         }
         
         if request.prefer_url and audio_url:
@@ -417,11 +494,15 @@ async def quest_vlm_chat(request: QuestVLMChatRequest):
     퀘스트 모드 - VLM 채팅 (이미지+텍스트 저장)
     """
     try:
-        logger.info(f"Quest VLM chat: {request.user_id}")
+        if not request.quest_id:
+            raise HTTPException(status_code=400, detail="quest_id is required for quest VLM chat")
+
+        logger.info(f"Quest VLM chat: user={request.user_id}, quest={request.quest_id}")
+        db = get_db()
+        ensure_user_exists(request.user_id)
         
-        session_id = request.chat_session_id
-        if not session_id:
-            session_id = str(uuid.uuid4())
+        session_id = request.chat_session_id or str(uuid.uuid4())
+        quest = fetch_quest_context(request.quest_id, db=db)
         
         # 이미지 디코딩
         try:
@@ -487,6 +568,11 @@ VLM 분석 결과:
                 logger.warning(f"Description enhancement failed: {e}")
         
         ai_response = final_description
+        quest_context = build_quest_context_block(quest)
+        ai_response = f"""{ai_response}
+
+현재 진행 중인 퀘스트 참고 정보:
+{quest_context}"""
         
         # TTS 생성
         audio_url = None
@@ -510,15 +596,33 @@ VLM 분석 결과:
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # 퀘스트 채팅은 히스토리에 저장하지 않음
-        # (이미지와 퀘스트 정보가 포함되어 있어서 히스토리에 남기지 않기로 결정)
+        # 히스토리에 저장 (조회 전용)
+        try:
+            existing_session = db.table("chat_logs").select("id").eq("chat_session_id", session_id).limit(1).execute()
+            is_first_message = not existing_session.data
+            title_value = quest.get("name") or quest.get("title")
+            db.table("chat_logs").insert({
+                "user_id": request.user_id,
+                "user_message": request.user_message or "이미지 기반 질문",
+                "ai_response": ai_response,
+                "mode": "quest",
+                "function_type": "vlm_chat",
+                "chat_session_id": session_id,
+                "title": title_value if is_first_message else None,
+                "landmark": title_value,
+                "image_url": image_url,
+                "is_read_only": True
+            }).execute()
+        except Exception as db_error:
+            logger.warning(f"Failed to save quest VLM chat log: {db_error}")
         
         response = {
             "success": True,
             "message": ai_response,
             "place": matched_place,
             "image_url": image_url,
-            "session_id": session_id
+            "session_id": session_id,
+            "quest_id": request.quest_id
         }
         
         if request.prefer_url and audio_url:

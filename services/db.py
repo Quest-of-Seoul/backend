@@ -70,6 +70,25 @@ def get_db() -> Client:
     return supabase_client
 
 
+def ensure_user_exists(user_id: str, email: Optional[str] = None, nickname: str = "Guest User") -> None:
+    """
+    Ensure that a user row exists so that FK constrained tables (points, chat_logs, etc.) can insert safely.
+    """
+    try:
+        db = get_db()
+        existing = db.table("users").select("id").eq("id", user_id).limit(1).execute()
+        if existing.data:
+            return
+        db.table("users").insert({
+            "id": user_id,
+            "email": email or f"{user_id}@guest.local",
+            "nickname": nickname
+        }).execute()
+    except Exception as exc:
+        logger.error(f"Failed to ensure user exists ({user_id}): {exc}", exc_info=True)
+        raise
+
+
 def search_places_by_radius(
     latitude: float,
     longitude: float,

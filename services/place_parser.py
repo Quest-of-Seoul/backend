@@ -28,7 +28,14 @@ def clean_html(text: Optional[str]) -> str:
         text,
         flags=re.IGNORECASE | re.DOTALL
     )
-    
+
+    # 줄바꿈 태그를 개행으로 변환
+    text = re.sub(r'<\s*br\s*/?>', '\n', text, flags=re.IGNORECASE)
+
+    # 블록 단위 태그 종료 시 개행 추가 (단락 구조 유지)
+    block_tags = r'(?:p|div|section|article|li|ul|ol|table|tr|td|th|h[1-6]|hr)'
+    text = re.sub(rf'</\s*{block_tags}\s*>', '\n', text, flags=re.IGNORECASE)
+
     # HTML 주석 제거
     text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
     
@@ -37,9 +44,15 @@ def clean_html(text: Optional[str]) -> str:
     
     # HTML 엔티티 디코딩
     text = unescape(text)
+
+    # 개행 통일
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
     
-    # 연속된 공백 정리
-    text = re.sub(r'\s+', ' ', text)
+    # 줄 내 공백 정리 (개행 보존)
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n{2,}', '\n', text)
+    lines = [line.strip() for line in text.split('\n')]
+    text = '\n'.join(line for line in lines if line)
     
     # 앞뒤 공백 제거
     text = text.strip()

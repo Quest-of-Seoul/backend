@@ -29,9 +29,12 @@ Production: `https://your-domain.com`
 ### Quest (퀘스트 관리)
 - GET `/quest/list` - 퀘스트 목록
 - POST `/quest/nearby` - 주변 퀘스트 검색
+- POST `/quest/start` - 퀘스트 시작/재개 (place_id 연결)
 - POST `/quest/progress` - 진행 상황 업데이트
 - GET `/quest/user/{user_id}` - 사용자 퀘스트 조회
-- GET `/quest/{quest_id}` - 퀘스트 상세 정보
+- GET `/quest/{quest_id}` - 퀘스트 상세 정보 (+ 사용자 포인트/상태)
+- GET `/quest/{quest_id}/quizzes` - 퀘스트 연동 퀴즈 조회
+- POST `/quest/{quest_id}/quizzes/{quiz_id}/submit` - 퀴즈 제출 및 포인트 적립
 
 ### Reward (리워드 시스템)
 - GET `/reward/points/{user_id}` - 포인트 조회
@@ -66,11 +69,11 @@ Production: `https://your-domain.com`
 - POST `/map/stats/walk-distance` - 선택한 퀘스트 루트의 총 거리 계산
 
 ### AI Station (AI Station 통합 기능)
-- GET `/ai-station/chat-list` - 채팅 리스트 조회 (일반 채팅, 여행 일정만)
+- GET `/ai-station/chat-list` - 채팅 리스트 조회 (탐험/퀘스트 모드 필터 지원)
 - GET `/ai-station/chat-session/{session_id}` - 특정 세션의 채팅 내역 조회
 - POST `/ai-station/explore/rag-chat` - 일반 채팅 (히스토리 저장, 첫 질문이 제목)
-- POST `/ai-station/quest/rag-chat` - 퀘스트 모드 RAG 채팅 (히스토리 저장 안 함)
-- POST `/ai-station/quest/vlm-chat` - 퀘스트 모드 VLM 채팅 (히스토리 저장 안 함)
+- POST `/ai-station/quest/rag-chat` - 퀘스트 모드 채팅 (퀘스트 정보 context, 히스토리 조회 전용)
+- POST `/ai-station/quest/vlm-chat` - 퀘스트 모드 VLM 채팅 (퀘스트 정보 context, 히스토리 조회 전용)
 - POST `/ai-station/stt-tts` - STT + TTS 통합 (음성 입력 → 텍스트 → 음성 출력)
 - POST `/ai-station/route-recommend` - 여행 일정 추천 (히스토리 저장, 보기 전용, 테마가 제목)
 
@@ -336,6 +339,51 @@ TTS 스트리밍
 
 ---
 
+### POST /quest/start
+
+사용자가 특정 장소 1km 이내에서 퀘스트를 시작(또는 재개)할 때 호출합니다. `user_quests`와 `user_quest_progress`가 동시에 초기화되고, 이후 퀘스트 챗/퀴즈 API에서 재사용할 `quest_id`와 `place_id`를 돌려줍니다.
+
+**Request Body:**
+
+```json
+{
+  "user_id": "user-123",
+  "quest_id": 1
+}
+```
+
+**Response:**
+
+```json
+{
+  "quest": {
+    "id": 1,
+    "name": "경복궁",
+    "description": "조선 왕조의 법궁...",
+    "reward_point": 300,
+    "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
+    "place": {
+      "address": "서울 종로구 사직로 161",
+      "district": "종로구",
+      "images": ["https://.../main.jpg"]
+    }
+  },
+  "place": {
+    "address": "서울 종로구 사직로 161",
+    "district": "종로구"
+  },
+  "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
+  "status": "in_progress",
+  "message": "Quest started"
+}
+```
+
+**Notes:**
+- 최초 호출 시 `user_quests` 레코드를 생성하고, 이후에는 기존 상태(예: completed)를 그대로 반환합니다.
+- 모든 FK 제약을 맞추기 위해 사용자 레코드가 없으면 자동으로 guest 사용자로 생성됩니다.
+
+---
+
 ### POST /quest/progress
 
 퀘스트 진행 상황 업데이트
@@ -376,6 +424,10 @@ TTS 스트리밍
   "message": "Quest status updated to in_progress"
 }
 ```
+
+**Notes:**
+- `completed` 상태에서 다시 `completed`를 호출해도 추가 포인트가 적립되지 않습니다.
+- 퀘스트 포인트는 퀴즈 정답 제출 (`/quest/{quest_id}/quizzes/{quiz_id}/submit`)과 `update_quest_progress` 중 하나만 사용하세요.
 
 ---
 
@@ -432,15 +484,102 @@ TTS 스트리밍
 
 ```json
 {
-  "id": 1,
-  "name": "경복궁 (Gyeongbokgung Palace)",
-  "description": "조선왕조의 법궁으로...",
-  "lat": 37.5796,
-  "lon": 126.9770,
-  "reward_point": 100,
-  "difficulty": "easy"
+  "quest": {
+    "id": 1,
+    "name": "경복궁 (Gyeongbokgung Palace)",
+    "description": "조선왕조의 법궁으로...",
+    "latitude": 37.5796,
+    "longitude": 126.9770,
+    "reward_point": 300,
+    "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
+    "place": {
+      "address": "서울 종로구 사직로 161",
+      "image_url": "https://.../main.jpg"
+    }
+  },
+  "user_status": {
+    "status": "completed",
+    "started_at": "2025-11-20T10:12:00",
+    "completed_at": "2025-11-20T10:20:00"
+  },
+  "user_points": 1240
 }
 ```
+
+**Notes:**
+- `user_id` 쿼리 파라미터를 전달하면 해당 유저의 진행 상태(`user_status`)와 현재 포인트(`user_points`)가 포함됩니다.
+- `user_id`가 없으면 `quest` 필드만 반환됩니다.
+
+---
+
+### GET /quest/{quest_id}/quizzes
+
+퀘스트 시작 이후 place_id에 연동된 퀴즈 세트를 조회합니다.
+
+**Response:**
+
+```json
+{
+  "quest": {
+    "id": 1,
+    "name": "경복궁",
+    "reward_point": 300
+  },
+  "quizzes": [
+    {
+      "id": 77,
+      "question": "경복궁의 정전 이름은?",
+      "options": ["근정전", "중화전", "명정전", "진전"],
+      "hint": "왕이 공식 업무를 보던 전각",
+      "difficulty": "easy"
+    }
+  ],
+  "count": 1
+}
+```
+
+---
+
+### POST /quest/{quest_id}/quizzes/{quiz_id}/submit
+
+퀘스트와 연결된 퀴즈를 제출하고 포인트를 적립합니다. 정답일 때만 `user_quests` 상태가 `completed`로 바뀌고 퀘스트 포인트가 `points` 테이블에 적립됩니다.
+
+**Request Body:**
+
+```json
+{
+  "user_id": "user-123",
+  "answer": 0
+}
+```
+
+**Response (정답):**
+
+```json
+{
+  "success": true,
+  "is_correct": true,
+  "points_awarded": 300,
+  "already_completed": false,
+  "new_balance": 1540,
+  "explanation": "근정전은 조선의 공식 의례가 치러지던 정전입니다."
+}
+```
+
+**Response (오답):**
+
+```json
+{
+  "success": true,
+  "is_correct": false,
+  "points_awarded": 0,
+  "already_completed": false
+}
+```
+
+**Notes:**
+- 동일 퀘스트에 대해 이미 `completed` 상태라면 `points_awarded`는 0이고 `already_completed`가 true로 반환됩니다.
+- 모든 시도 횟수는 `user_quest_progress.quiz_attempts`에 누적됩니다.
 
 ---
 
@@ -1502,8 +1641,7 @@ VLM 서비스 상태 확인
 
 ### GET /ai-station/chat-list
 
-채팅 리스트 조회 (하프 모달용)
-일반 채팅(rag_chat)과 여행 일정(route_recommend)만 반환
+탐험/퀘스트 모드를 아우르는 채팅 리스트 조회 (하프 모달용). `mode`와 `function_type`을 조합해서 필요한 탭만 불러올 수 있습니다.
 
 **Query Parameters:**
 
@@ -1511,6 +1649,8 @@ VLM 서비스 상태 확인
 |-------|------|----------|-------------|
 | user_id | string | 필수 | 사용자 ID |
 | limit | integer | 선택 | 결과 개수 (기본: 20) |
+| mode | string | 선택 | `explore`, `quest` 중 선택 |
+| function_type | string | 선택 | `rag_chat`, `vlm_chat`, `route_recommend` |
 
 **Response:**
 
@@ -1521,6 +1661,7 @@ VLM 서비스 상태 확인
     {
       "session_id": "uuid",
       "function_type": "rag_chat",
+      "mode": "explore",
       "title": "근정전에 대해 알려줘",
       "is_read_only": false,
       "created_at": "2024-01-01T12:00:00Z",
@@ -1538,12 +1679,31 @@ VLM 서비스 상태 확인
     {
       "session_id": "uuid-2",
       "function_type": "route_recommend",
+      "mode": "explore",
       "title": "역사유적 탐방",
       "is_read_only": true,
       "created_at": "2024-01-01T10:00:00Z",
       "updated_at": "2024-01-01T10:00:00Z",
       "time_ago": "01월 01일",
       "chats": []
+    },
+    {
+      "session_id": "uuid-3",
+      "function_type": "rag_chat",
+      "mode": "quest",
+      "title": "경복궁 퀘스트",
+      "is_read_only": true,
+      "created_at": "2024-01-01T09:00:00Z",
+      "updated_at": "2024-01-01T09:05:00Z",
+      "time_ago": "01월 01일",
+      "chats": [
+        {
+          "id": 31,
+          "user_message": "이 궁궐의 하이라이트가 뭐야?",
+          "ai_response": "경복궁의 하이라이트는 근정전과 경회루... ",
+          "created_at": "2024-01-01T09:05:00Z"
+        }
+      ]
     }
   ],
   "count": 2
@@ -1551,8 +1711,8 @@ VLM 서비스 상태 확인
 ```
 
 **Notes:**
-- `title`: 일반 채팅은 첫 번째 질문, 여행 일정은 테마
-- `is_read_only`: 여행 일정은 true (수정 불가)
+- `title`: 일반 채팅은 첫 번째 질문, 여행 일정은 테마, 퀘스트 채팅은 퀘스트명
+- `is_read_only`: 여행 일정/퀘스트 채팅은 true (조회만 가능)
 - `time_ago`: "방금", "5분전", "2시간전", "01월 01일" 형식
 
 ---
@@ -1581,6 +1741,7 @@ VLM 서비스 상태 확인
   "session": {
     "session_id": "uuid",
     "function_type": "rag_chat",
+    "mode": "explore",
     "title": "근정전에 대해 알려줘",
     "is_read_only": false,
     "created_at": "2024-01-01T12:00:00Z"
@@ -1645,16 +1806,15 @@ VLM 서비스 상태 확인
 
 ### POST /ai-station/quest/rag-chat
 
-퀘스트 모드 - 일반 RAG 채팅
-**히스토리에 저장하지 않음** (이미지와 퀘스트 정보 포함)
+퀘스트 모드 - 장소 메타데이터를 context로 사용하는 LLM 채팅. 세션은 자동 생성되며 히스토리에 **조회 전용**으로 저장됩니다.
 
 **Request Body:**
 
 ```json
 {
   "user_id": "user-123",
+  "quest_id": 1,
   "user_message": "이 장소의 역사를 알려줘",
-  "landmark": "경복궁",
   "language": "ko",
   "prefer_url": false,
   "enable_tts": true,
@@ -1669,23 +1829,28 @@ VLM 서비스 상태 확인
   "success": true,
   "message": "경복궁은 조선왕조의 법궁으로...",
   "landmark": "경복궁",
+  "quest_id": 1,
   "session_id": "uuid",
   "audio": "base64_encoded_audio_or_null"
 }
 ```
 
+**Notes:**
+- `quest_id`는 반드시 전달해야 하며, 서버가 해당 퀘스트/장소 설명을 context로 붙여 응답합니다.
+- 히스토리에 저장되지만 `is_read_only = true` 로 표시되므로 이어 쓰기는 불가합니다.
+
 ---
 
 ### POST /ai-station/quest/vlm-chat
 
-퀘스트 모드 - VLM 채팅
-**히스토리에 저장하지 않음** (이미지와 퀘스트 정보 포함)
+퀘스트 모드 - VLM 채팅. 사용자가 업로드한 이미지를 분석하고, 현재 진행 중인 퀘스트 장소 정보와 결합하여 설명합니다. 결과는 히스토리에 **조회 전용**으로 저장됩니다.
 
 **Request Body:**
 
 ```json
 {
   "user_id": "user-123",
+  "quest_id": 1,
   "image": "base64_encoded_image",
   "user_message": "이 장소가 뭐야?",
   "language": "ko",
@@ -1707,10 +1872,15 @@ VLM 서비스 상태 확인
     "category": "역사유적"
   },
   "image_url": "https://storage.url/image.jpg",
+  "quest_id": 1,
   "session_id": "uuid",
   "audio": "base64_encoded_audio_or_null"
 }
 ```
+
+**Notes:**
+- `quest_id`로 전달된 퀘스트 정보를 context로 첨부하여, 사용자가 찍은 이미지가 해당 장소와 어떻게 연결되는지 안내합니다.
+- 히스토리에서는 `function_type = vlm_chat`, `mode = quest`, `is_read_only = true`로 관리됩니다.
 
 ---
 
