@@ -723,45 +723,284 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 if quests and len(quests) > 0:
                     must_visit_quest = quests[0]
         
-        # 사용자 취향 기반 추천 로직
-        # TODO: 실제 추천 알고리즘 구현 필요
-        # 현재는 간단히 주변 퀘스트를 가져오는 방식
+        # 사용자 취향 기반 추천 알고리즘 구현
+        import math
         
-        # 주변 퀘스트 조회
+        # 1. 사용자 취향 분석
+        preferences = request.preferences or {}
+        preferred_category = None
+        if isinstance(preferences.get("category"), dict):
+            preferred_category = preferences["category"].get("name")
+        elif isinstance(preferences.get("category"), str):
+            preferred_category = preferences["category"]
+        elif preferences.get("theme"):
+            theme = preferences["theme"]
+            if isinstance(theme, dict):
+                preferred_category = theme.get("name")
+            else:
+                preferred_category = str(theme)
+        
+        # 2. 사용자의 완료한 퀘스트 조회 (다양성 점수 계산용)
+        completed_quests_result = db.table("user_quests").select("quest_id, quests(category)").eq("user_id", user_id).eq("status", "completed").execute()
+        completed_categories = set()
+        completed_quest_ids = set()
+        
+        # 카테고리 정규화 함수 (아래에서 정의되지만 미리 선언)
+        def normalize_category(category: str) -> str:
+            """카테고리를 영어로 정규화 (한글->영어 매핑)"""
+            if not category:
+                return ""
+            
+            category_lower = category.lower().strip()
+            
+            # 한글-영어 매핑
+            category_map = {
+                # History 관련
+                "역사": "history",
+                "역사유적": "history",
+                "문화재": "history",
+                "궁궐": "history",
+                "유적지": "history",
+                "historical": "history",
+                # Attractions 관련
+                "관광지": "attractions",
+                "명소": "attractions",
+                "전망대": "attractions",
+                "landmark": "attractions",
+                "tourist": "attractions",
+                # Culture 관련
+                "문화": "culture",
+                "문화마을": "culture",
+                "한옥마을": "culture",
+                "전통마을": "culture",
+                "traditional": "culture",
+                # Religion 관련
+                "종교": "religion",
+                "종교시설": "religion",
+                "사찰": "religion",
+                "성당": "religion",
+                "교회": "religion",
+                "temple": "religion",
+                # Park 관련
+                "공원": "park",
+                "광장": "park",
+                "야외공간": "park",
+                "square": "park",
+                "outdoor": "park",
+            }
+            
+            # 매핑에 있으면 변환
+            if category_lower in category_map:
+                return category_map[category_lower]
+            
+            # 이미 영어면 소문자로 반환 (비교 시 일관성 유지)
+            # 'History' -> 'history', 'Attractions' -> 'attractions' 등
+            return category_lower
+        
+        if completed_quests_result.data:
+            for uq in completed_quests_result.data:
+                completed_quest_ids.add(uq.get("quest_id"))
+                quest_data = uq.get("quests")
+                if quest_data:
+                    if isinstance(quest_data, list) and len(quest_data) > 0:
+                        category = quest_data[0].get("category")
+                    elif isinstance(quest_data, dict):
+                        category = quest_data.get("category")
+                    else:
+                        category = None
+                    if category:
+                        # 카테고리를 정규화하여 저장
+                        normalized = normalize_category(category)
+                        if normalized:
+                            completed_categories.add(normalized)
+        
+        # 3. 퀘스트 후보 조회
         if request.latitude and request.longitude:
             from routers.recommend import get_nearby_quests_route
             nearby_result = await get_nearby_quests_route(
                 latitude=request.latitude,
                 longitude=request.longitude,
-                radius_km=10.0,
-                limit=20
+                radius_km=15.0,  # 더 넓은 범위에서 후보 수집
+                limit=50
             )
-            
-            quests = nearby_result.get("quests", [])
+            candidate_quests = nearby_result.get("quests", [])
         else:
             # 위치 정보가 없으면 전체 퀘스트에서 추천
-            quests_result = db.table("quests").select("*, places(*)").eq("is_active", True).limit(20).execute()
-            quests = []
+            quests_result = db.table("quests").select("*, places(*)").eq("is_active", True).limit(50).execute()
+            candidate_quests = []
             for q in quests_result.data:
                 quest = dict(q)
                 place = quest.get("places")
                 if place:
-                    quest["district"] = place.get("district")
-                    quest["place_image_url"] = place.get("image_url")
-                quests.append(quest)
+                    if isinstance(place, list) and len(place) > 0:
+                        place = place[0]
+                    quest["district"] = place.get("district") if isinstance(place, dict) else None
+                    quest["place_image_url"] = place.get("image_url") if isinstance(place, dict) else None
+                candidate_quests.append(quest)
         
-        # 필수 방문 장소가 있으면 첫 번째로 추가
+        # 4. 각 퀘스트에 대해 점수 계산
+        def calculate_distance_score(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+            """거리 기반 점수 (0.0 ~ 1.0, 가까울수록 높음)"""
+            if not (lat1 and lon1 and lat2 and lon2):
+                return 0.5  # 위치 정보가 없으면 중간 점수
+            
+            R = 6371  # 지구 반지름 (km)
+            lat1_rad = math.radians(lat1)
+            lat2_rad = math.radians(lat2)
+            delta_lat = math.radians(lat2 - lat1)
+            delta_lon = math.radians(lon2 - lon1)
+            
+            a = (math.sin(delta_lat / 2) ** 2 + 
+                 math.cos(lat1_rad) * math.cos(lat2_rad) * 
+                 math.sin(delta_lon / 2) ** 2)
+            c = 2 * math.asin(math.sqrt(a))
+            distance_km = R * c
+            
+            # 15km 이내면 거리 점수 적용, 그 외는 0.1
+            if distance_km <= 15.0:
+                return max(0.1, 1.0 - (distance_km / 15.0))
+            else:
+                return 0.1
+        
+        def calculate_category_score(quest_category: str, preferred: Optional[str]) -> float:
+            """카테고리 매칭 점수 (0.0 ~ 1.0) - 영어 카테고리 기준"""
+            if not preferred or not quest_category:
+                return 0.5  # 선호도가 없으면 중간 점수
+            
+            # 카테고리 정규화 (영어로)
+            quest_cat_normalized = normalize_category(quest_category)
+            preferred_cat_normalized = normalize_category(preferred)
+            
+            if not quest_cat_normalized or not preferred_cat_normalized:
+                return 0.5
+            
+            # 정확히 일치
+            if quest_cat_normalized.lower() == preferred_cat_normalized.lower():
+                return 1.0
+            
+            # 유사 카테고리 그룹 (영어 기준)
+            similar_groups = [
+                {"history", "historical"},
+                {"attractions", "landmark", "tourist"},
+                {"culture", "traditional"},
+                {"religion", "temple"},
+                {"park", "square", "outdoor"},
+            ]
+            
+            for group in similar_groups:
+                if quest_cat_normalized.lower() in group and \
+                   preferred_cat_normalized.lower() in group:
+                    return 0.7
+            
+            return 0.3  # 관련 없음
+        
+        def calculate_popularity_score(completion_count: int) -> float:
+            """인기도 점수 (0.0 ~ 1.0)"""
+            # completion_count를 0~1 범위로 정규화 (최대 1000 기준)
+            return min(1.0, completion_count / 100.0)
+        
+        def calculate_diversity_score(quest_category: str, completed_categories: set) -> float:
+            """다양성 점수 (0.0 ~ 1.0, 완료한 카테고리와 다를수록 높음) - 영어 카테고리 기준"""
+            if not completed_categories:
+                return 1.0  # 완료한 게 없으면 다양성 최고
+            
+            # 카테고리 정규화
+            quest_cat_normalized = normalize_category(quest_category)
+            if not quest_cat_normalized:
+                return 0.5
+            
+            if quest_cat_normalized.lower() in {cat.lower() for cat in completed_categories}:
+                return 0.3  # 이미 완료한 카테고리면 낮은 점수
+            else:
+                return 1.0  # 새로운 카테고리면 높은 점수
+        
+        def calculate_reward_score(reward_point: int) -> float:
+            """포인트 점수 (0.0 ~ 1.0)"""
+            # reward_point를 0~1 범위로 정규화 (최대 500 기준)
+            return min(1.0, reward_point / 200.0)
+        
+        # 각 퀘스트에 점수 부여
+        scored_quests = []
+        for quest in candidate_quests:
+            quest_id = quest.get("id")
+            
+            # 이미 완료한 퀘스트는 제외
+            if quest_id in completed_quest_ids:
+                continue
+            
+            # 필수 방문 장소는 제외 (나중에 별도로 추가)
+            if must_visit_quest and quest_id == must_visit_quest.get("id"):
+                continue
+            
+            quest_category = quest.get("category", "")
+            quest_lat = quest.get("latitude")
+            quest_lon = quest.get("longitude")
+            completion_count = quest.get("completion_count", 0)
+            reward_point = quest.get("reward_point", 100)
+            
+            # 각 점수 계산
+            category_score = calculate_category_score(quest_category, preferred_category)
+            distance_score = calculate_distance_score(
+                request.latitude or 37.5665, 
+                request.longitude or 126.9780,
+                float(quest_lat) if quest_lat else None,
+                float(quest_lon) if quest_lon else None
+            ) if request.latitude and request.longitude else 0.5
+            popularity_score = calculate_popularity_score(completion_count)
+            diversity_score = calculate_diversity_score(quest_category, completed_categories)
+            reward_score = calculate_reward_score(reward_point)
+            
+            # 가중치 적용하여 종합 점수 계산
+            weights = {
+                "category": 0.3,      # 카테고리 매칭 중요
+                "distance": 0.25,     # 거리 중요
+                "diversity": 0.2,    # 다양성 중요
+                "popularity": 0.15,   # 인기도
+                "reward": 0.1         # 포인트
+            }
+            
+            final_score = (
+                category_score * weights["category"] +
+                distance_score * weights["distance"] +
+                diversity_score * weights["diversity"] +
+                popularity_score * weights["popularity"] +
+                reward_score * weights["reward"]
+            )
+            
+            quest["recommendation_score"] = round(final_score, 3)
+            quest["score_breakdown"] = {
+                "category": round(category_score, 3),
+                "distance": round(distance_score, 3),
+                "diversity": round(diversity_score, 3),
+                "popularity": round(popularity_score, 3),
+                "reward": round(reward_score, 3)
+            }
+            
+            scored_quests.append(quest)
+        
+        # 5. 종합 점수로 정렬
+        scored_quests.sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
+        
+        # 6. 추천 퀘스트 선택 (필수 방문 장소 포함)
         recommended_quests = []
         if must_visit_quest:
             recommended_quests.append(must_visit_quest)
-        
-        # 나머지 3개 선택 (필수 방문 장소 제외)
-        if must_visit_quest:
-            must_visit_id = must_visit_quest.get("id")
-            remaining_quests = [q for q in quests if q.get("id") != must_visit_id]
+            # 나머지 3개 선택
+            remaining_count = 3
         else:
-            remaining_quests = quests
-        recommended_quests.extend(remaining_quests[:3])
+            remaining_count = 4
+        
+        # 상위 점수 퀘스트 선택
+        for quest in scored_quests[:remaining_count * 2]:  # 여유있게 선택
+            if len(recommended_quests) >= remaining_count:
+                break
+            
+            # 중복 제거 (같은 장소는 하나만)
+            place_id = quest.get("place_id")
+            if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                continue
+            
+            recommended_quests.append(quest)
         
         # 4개로 맞추기
         recommended_quests = recommended_quests[:4]
