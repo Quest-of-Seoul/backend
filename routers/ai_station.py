@@ -158,18 +158,43 @@ async def get_chat_list(
 ):
     """
     채팅 리스트 조회 (하프 모달용)
-    일반 채팅(rag_chat)과 여행 일정(route_recommend)만 반환
+    mode와 function_type을 조합하여 필터링:
+    - 일반 채팅: mode=explore, function_type=rag_chat
+    - 여행일정 채팅: mode=explore, function_type=route_recommend
+    - 퀘스트 채팅: mode=quest, function_type=rag_chat 또는 vlm_chat
+    
+    mode와 function_type이 모두 없으면 일반 채팅만 반환 (기본값)
     """
     try:
         db = get_db()
         
         query = db.table("chat_logs").select("*").eq("user_id", user_id)
-        if mode:
+        
+        # mode와 function_type 필터링
+        if mode and function_type:
+            # 둘 다 지정된 경우: 정확히 일치하는 것만
+            query = query.eq("mode", mode).eq("function_type", function_type)
+        elif mode:
+            # mode만 지정된 경우
             query = query.eq("mode", mode)
-        if function_type:
+            if mode == "quest":
+                # 퀘스트 모드는 rag_chat과 vlm_chat만
+                query = query.in_("function_type", ["rag_chat", "vlm_chat"])
+            elif mode == "explore":
+                # 탐색 모드는 rag_chat과 route_recommend만
+                query = query.in_("function_type", ["rag_chat", "route_recommend"])
+        elif function_type:
+            # function_type만 지정된 경우
             query = query.eq("function_type", function_type)
+            # function_type에 따라 mode도 필터링
+            if function_type == "route_recommend":
+                query = query.eq("mode", "explore")
+            elif function_type in ["rag_chat", "vlm_chat"]:
+                # rag_chat과 vlm_chat은 explore와 quest 둘 다 가능하므로 mode 필터링 안 함
+                pass
         else:
-            query = query.in_("function_type", ["rag_chat", "route_recommend", "vlm_chat"])
+            # 둘 다 없으면 기본값: 일반 채팅만 (mode=explore, function_type=rag_chat)
+            query = query.eq("mode", "explore").eq("function_type", "rag_chat")
 
         result = query.order("created_at", desc=True).limit(limit * 10).execute()
         

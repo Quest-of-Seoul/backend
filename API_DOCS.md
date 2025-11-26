@@ -1776,6 +1776,17 @@ VLM 서비스 상태 확인
 | mode | string | 선택 | `explore`, `quest` 중 선택 |
 | function_type | string | 선택 | `rag_chat`, `vlm_chat`, `route_recommend` |
 
+**필터링 규칙:**
+- `mode`와 `function_type` 모두 없으면: **일반 채팅만** 반환 (`mode=explore`, `function_type=rag_chat`)
+- `mode`만 지정:
+  - `mode=explore`: 일반 채팅(`rag_chat`) + 여행일정 채팅(`route_recommend`)
+  - `mode=quest`: 퀘스트 채팅(`rag_chat`, `vlm_chat`)
+- `function_type`만 지정:
+  - `function_type=rag_chat`: 일반 채팅(`explore`) + 퀘스트 채팅(`quest`)
+  - `function_type=vlm_chat`: 퀘스트 채팅(`quest`)만
+  - `function_type=route_recommend`: 여행일정 채팅(`explore`)만
+- 둘 다 지정: 정확히 일치하는 것만 반환
+
 **Response:**
 
 ```json
