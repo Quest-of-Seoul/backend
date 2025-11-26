@@ -504,13 +504,13 @@ BEGIN
         p.category,
         p.metadata->>'rag_text' AS rag_text,
         ts_rank(
-            to_tsvector('korean', COALESCE(p.metadata->>'rag_text', '')),
-            plainto_tsquery('korean', search_query)
+            to_tsvector('simple', COALESCE(p.metadata->>'rag_text', '')),
+            plainto_tsquery('simple', search_query)
         ) AS similarity_score
     FROM places p
     WHERE p.is_active = TRUE
         AND p.metadata->>'rag_text' IS NOT NULL
-        AND to_tsvector('korean', p.metadata->>'rag_text') @@ plainto_tsquery('korean', search_query)
+        AND to_tsvector('simple', p.metadata->>'rag_text') @@ plainto_tsquery('simple', search_query)
     ORDER BY similarity_score DESC
     LIMIT limit_count;
 END;
