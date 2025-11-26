@@ -9,27 +9,6 @@ from typing import List, Dict, Optional, Set
 logger = logging.getLogger(__name__)
 
 VISIT_SEOUL_BASE_URL = "https://api-call.visitseoul.net/api/v1"
-CACHE_TTL_SECONDS = 60 * 60 * 24  # 24시간 캐싱
-
-_category_cache: Dict[str, Optional[List[Dict]]] = {
-    "data": None,
-    "expires_at": 0.0
-}
-_lang_code_cache: Dict[str, Optional[List[Dict]]] = {
-    "data": None,
-    "expires_at": 0.0
-}
-
-
-def _cache_expired(cache_bucket: Dict[str, Optional[List[Dict]]]) -> bool:
-    """간단한 TTL 기반 캐시 만료 여부 확인"""
-    return not cache_bucket["data"] or time.time() >= cache_bucket["expires_at"]
-
-
-def _set_cache(cache_bucket: Dict[str, Optional[List[Dict]]], data: List[Dict]) -> None:
-    """캐시 갱신"""
-    cache_bucket["data"] = data
-    cache_bucket["expires_at"] = time.time() + CACHE_TTL_SECONDS
 
 
 def normalize_category_path(path: Optional[str]) -> str:
@@ -49,8 +28,15 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
             "문화관광 > 테마공원",
             "문화관광 > 기타문화관광지"
         ],
-        "include_keywords": ["랜드마크", "테마공원", "Landmark", "Theme Park"],
-        "exclude_keywords": []
+        "include_paths_en": [
+            "Cultural Tourism > Landmark Tourism",
+            "Cultural Tourism > Theme Park",
+            "Cultural Tourism > Other Cultural Attractions"
+        ],
+        "include_keywords": ["랜드마크", "테마공원"],
+        "include_keywords_en": ["Landmark", "Theme Park", "Attraction", "Hot Spot"],
+        "exclude_keywords": [],
+        "exclude_keywords_en": []
     },
     "History": {
         "description": "역사·유적지·궁·전통 공간",
@@ -58,8 +44,13 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
         "include_paths": [
             "역사관광"
         ],
-        "include_keywords": ["역사관광", "History", "유적", "궁", "전통"],
-        "exclude_keywords": []
+        "include_paths_en": [
+            "Historical Tourism"
+        ],
+        "include_keywords": ["역사관광", "역사", "유적", "궁", "전통"],
+        "include_keywords_en": ["History", "Historic", "Heritage", "Palace", "Traditional"],
+        "exclude_keywords": [],
+        "exclude_keywords_en": []
     },
     "Culture": {
         "description": "박물관·미술관·전시·공연 등 문화시설",
@@ -71,8 +62,17 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
             "문화관광 > 박물관",
             "축제/공연/행사 > 전시회"
         ],
-        "include_keywords": ["전시", "미술관", "Museum", "Gallery", "Exhibition"],
-        "exclude_keywords": []
+        "include_paths_en": [
+            "Cultural Tourism > Exhibition Facilities",
+            "Cultural Tourism > Other Exhibition Facilities",
+            "Cultural Tourism > Art Gallery",
+            "Cultural Tourism > Museum",
+            "Festival/Performance/Event > Exhibition"
+        ],
+        "include_keywords": ["전시", "미술관", "박물관"],
+        "include_keywords_en": ["Museum", "Gallery", "Exhibition", "Art Gallery", "Art Museum"],
+        "exclude_keywords": [],
+        "exclude_keywords_en": []
     },
     "Nature": {
         "description": "공원·산·강·자연풍경",
@@ -81,15 +81,24 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
             "자연관광",
             "문화관광 > 도시공원"
         ],
-        "include_keywords": ["자연", "공원", "Nature", "Park"],
-        "exclude_keywords": []
+        "include_paths_en": [
+            "Nature Tourism",
+            "Cultural Tourism > Urban Park"
+        ],
+        "include_keywords": ["자연", "공원"],
+        "include_keywords_en": ["Nature", "Park", "Urban Park", "Natural"],
+        "exclude_keywords": [],
+        "exclude_keywords_en": []
     },
     "Food": {
         "description": "식당·길거리음식·현지 맛집 (카페/주점 제외)",
         "total_count": 1004,
         "include_prefixes": ["음식"],
-        "include_keywords": ["음식", "맛집", "Food", "Restaurant"],
-        "exclude_keywords": ["카페", "찻집", "Cafe", "Coffee", "주점", "Bar", "티하우스"]
+        "include_prefixes_en": ["Food"],
+        "include_keywords": ["음식", "맛집"],
+        "include_keywords_en": ["Food", "Restaurant", "Dining"],
+        "exclude_keywords": ["카페", "찻집", "주점", "티하우스"],
+        "exclude_keywords_en": ["Cafe", "Coffee", "Bar", "Tea House"]
     },
     "Drinks": {
         "description": "카페·티하우스·바(주점)",
@@ -98,8 +107,14 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
             "음식 > 카페/찻집",
             "음식 > 주점"
         ],
-        "include_keywords": ["카페", "Cafe", "Coffee", "주점", "Bar", "티하우스"],
-        "exclude_keywords": []
+        "include_paths_en": [
+            "Food > Cafe/Tea House",
+            "Food > Bar"
+        ],
+        "include_keywords": ["카페", "찻집", "주점", "티하우스"],
+        "include_keywords_en": ["Cafe", "Coffee", "Bar", "Tea House", "Beverage"],
+        "exclude_keywords": [],
+        "exclude_keywords_en": []
     },
     "Shopping": {
         "description": "쇼핑·시장·상점가",
@@ -107,8 +122,13 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
         "include_paths": [
             "쇼핑"
         ],
-        "include_keywords": ["쇼핑", "Shopping", "시장", "마켓", "Market"],
-        "exclude_keywords": []
+        "include_paths_en": [
+            "Shopping"
+        ],
+        "include_keywords": ["쇼핑", "시장", "마켓"],
+        "include_keywords_en": ["Shopping", "Market", "Store", "Shopping Mall"],
+        "exclude_keywords": [],
+        "exclude_keywords_en": []
     },
     "Activities": {
         "description": "체험·클래스·액티비티",
@@ -117,8 +137,14 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
             "체험관광",
             "문화관광 > 레저스포츠시설"
         ],
-        "include_keywords": ["체험", "Experience", "레저", "스포츠", "Leisure", "Sports"],
-        "exclude_keywords": []
+        "include_paths_en": [
+            "Experience Tourism",
+            "Cultural Tourism > Leisure Sports Facilities"
+        ],
+        "include_keywords": ["체험", "레저", "스포츠"],
+        "include_keywords_en": ["Experience", "Leisure", "Sports", "Activity", "Adventure"],
+        "exclude_keywords": [],
+        "exclude_keywords_en": []
     },
     "Events": {
         "description": "축제·공연·행사",
@@ -130,21 +156,30 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
             "축제/공연/행사 > 기타행사",
             "축제/공연/행사 > 박람회"
         ],
-        "include_keywords": ["축제", "Festival", "공연", "Performance", "행사", "Event", "박람회"],
-        "exclude_keywords": ["전시회"]  # 전시회는 Culture에 포함
+        "include_paths_en": [
+            "Festival/Performance/Event > Festival",
+            "Festival/Performance/Event > Performance",
+            "Festival/Performance/Event > Event",
+            "Festival/Performance/Event > Other Event",
+            "Festival/Performance/Event > Exhibition"
+        ],
+        "include_keywords": ["축제", "공연", "행사", "박람회"],
+        "include_keywords_en": ["Festival", "Performance", "Event", "Show", "Fair"],
+        "exclude_keywords": ["전시회"],
+        "exclude_keywords_en": ["Exhibition"]  # 전시회는 Culture에 포함
     }
 }
 
 CATEGORY_KEYWORD_FALLBACKS: Dict[str, List[str]] = {
-    "Attractions": ["랜드마크관광", "랜드마크", "Landmark", "테마공원", "Theme Park", "기타문화관광지", "핫플"],
-    "History": ["역사관광", "역사", "History", "Historic", "유적", "궁", "전통"],
-    "Culture": ["전시시설", "전시", "Exhibition", "미술관", "화랑", "Museum", "Gallery", "박물관", "기타전시시설", "전시회"],
-    "Nature": ["자연관광", "자연", "Nature", "도시공원", "공원", "Park"],
-    "Food": ["음식", "식당", "맛집", "레스토랑", "Restaurant", "Food"],
-    "Drinks": ["카페", "찻집", "Cafe", "Coffee", "티하우스", "주점", "Bar", "바"],
-    "Shopping": ["쇼핑", "Shopping", "마켓", "시장", "상점", "Market"],
-    "Activities": ["체험관광", "체험", "Experience", "레저스포츠시설", "레저", "스포츠", "Leisure", "Sports", "액티비티"],
-    "Events": ["축제", "Festival", "공연", "Performance", "행사", "Event", "기타행사", "박람회"]
+    "Attractions": ["Landmark", "Theme Park", "Attraction", "Hot Spot", "Tourist Spot"],
+    "History": ["History", "Historic", "Heritage", "Palace", "Traditional", "Historic Site"],
+    "Culture": ["Museum", "Gallery", "Exhibition", "Art Gallery", "Art Museum", "Cultural"],
+    "Nature": ["Nature", "Park", "Urban Park", "Natural", "Green Space"],
+    "Food": ["Food", "Restaurant", "Dining", "Cuisine", "Eatery"],
+    "Drinks": ["Cafe", "Coffee", "Bar", "Tea House", "Beverage", "Drink"],
+    "Shopping": ["Shopping", "Market", "Store", "Shopping Mall", "Retail"],
+    "Activities": ["Experience", "Leisure", "Sports", "Activity", "Adventure", "Recreation"],
+    "Events": ["Festival", "Performance", "Event", "Show", "Fair", "Concert"]
 }
 
 
@@ -163,27 +198,28 @@ def get_api_headers() -> Dict[str, str]:
     }
 
 
-def get_category_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[Dict]:
+def get_category_list(lang_code_id: str = "en", retry_count: int = 3, retry_delay: float = 1.0) -> List[Dict]:
     """
     카테고리 목록 조회
     
     Args:
+        lang_code_id: 언어 코드 (ko, en, ja, zh) - 기본값: en
         retry_count: 재시도 횟수
         retry_delay: 재시도 간격 (초)
     
     Returns:
         카테고리 리스트
     """
-    # 캐시 데이터가 유효하면 즉시 반환
-    if not _cache_expired(_category_cache):
-        return _category_cache["data"] or []
-
     url = f"{VISIT_SEOUL_BASE_URL}/category/list"
     headers = get_api_headers()
     
+    # 카테고리 목록 API는 언어 파라미터를 지원하지 않을 수 있지만, 
+    # 카테고리 이름과 경로는 언어별로 다를 수 있으므로 일단 요청만 수행
+    # 실제 매칭은 map_category_to_visit_seoul_sn에서 언어별 키워드로 처리
+    
     for attempt in range(retry_count):
         try:
-            logger.info(f"Fetching category list (attempt: {attempt + 1})")
+            logger.info(f"Fetching category list (lang: {lang_code_id}, attempt: {attempt + 1})")
             response = requests.get(url, headers=headers, timeout=30)
             response.raise_for_status()
             
@@ -192,7 +228,6 @@ def get_category_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[Di
             if data.get("result_code") == 200 and "data" in data:
                 categories = data["data"]
                 logger.info(f"Found {len(categories)} categories")
-                _set_cache(_category_cache, categories)
                 return categories
             else:
                 logger.error(f"Unexpected response: {data}")
@@ -215,6 +250,7 @@ def get_category_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[Di
 
 def map_category_to_visit_seoul_sn(
     category: str,
+    lang_code_id: str = "en",
     retry_count: int = 3,
     retry_delay: float = 1.0
 ) -> Optional[List[str]]:
@@ -224,22 +260,32 @@ def map_category_to_visit_seoul_sn(
     
     Args:
         category: 카테고리 (Attractions, History, Culture, Nature, Food, Drinks, Shopping, Activities, Events)
+        lang_code_id: 언어 코드 (ko, en, ja, zh) - 영문일 경우 영문 경로/키워드 사용
         retry_count: 재시도 횟수
         retry_delay: 재시도 간격 (초)
     
     Returns:
         VISIT SEOUL category_sn (com_ctgry_sn) 리스트 또는 None
     """
-    categories = get_category_list(retry_count, retry_delay)
+    categories = get_category_list(lang_code_id, retry_count, retry_delay)
     if not categories:
         logger.warning(f"Could not fetch VISIT SEOUL categories, returning None for {category}")
         return None
     
     category_info = CATEGORY_DATASET_INFO.get(category, {})
-    include_paths = [normalize_category_path(p) for p in category_info.get("include_paths", [])]
-    include_prefixes = [normalize_category_path(p) for p in category_info.get("include_prefixes", [])]
-    include_keywords = category_info.get("include_keywords") or CATEGORY_KEYWORD_FALLBACKS.get(category, [])
-    exclude_keywords = category_info.get("exclude_keywords", [])
+    
+    # 언어에 따라 적절한 경로와 키워드 선택
+    is_english = lang_code_id == "en"
+    if is_english:
+        include_paths = [normalize_category_path(p) for p in category_info.get("include_paths_en", [])]
+        include_prefixes = [normalize_category_path(p) for p in category_info.get("include_prefixes_en", [])]
+        include_keywords = category_info.get("include_keywords_en") or CATEGORY_KEYWORD_FALLBACKS.get(category, [])
+        exclude_keywords = category_info.get("exclude_keywords_en", [])
+    else:
+        include_paths = [normalize_category_path(p) for p in category_info.get("include_paths", [])]
+        include_prefixes = [normalize_category_path(p) for p in category_info.get("include_prefixes", [])]
+        include_keywords = category_info.get("include_keywords") or []
+        exclude_keywords = category_info.get("exclude_keywords", [])
     
     if not include_paths and not include_keywords and not include_prefixes:
         logger.warning(f"Unknown category: {category}")
@@ -312,9 +358,6 @@ def get_lang_code_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[D
     Returns:
         언어 코드 리스트
     """
-    if not _cache_expired(_lang_code_cache):
-        return _lang_code_cache["data"] or []
-
     url = f"{VISIT_SEOUL_BASE_URL}/code/lang"
     headers = get_api_headers()
     
@@ -329,7 +372,6 @@ def get_lang_code_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[D
             if data.get("result_code") == 200 and "data" in data:
                 lang_codes = data["data"]
                 logger.info(f"Found {len(lang_codes)} language codes")
-                _set_cache(_lang_code_cache, lang_codes)
                 return lang_codes
             else:
                 logger.error(f"Unexpected response: {data}")
@@ -352,7 +394,7 @@ def get_lang_code_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[D
 
 def search_places_by_category(
     category: Optional[str] = None,
-    lang_code_id: str = "ko",
+    lang_code_id: str = "en",
     keyword: Optional[str] = None,
     sort_type: str = "latest",
     page_no: int = 1,
@@ -686,7 +728,7 @@ def parse_visit_seoul_place(item: Dict, detail: Optional[Dict] = None) -> Dict:
 
 def collect_all_places_by_category(
     category_sn: Optional[str] = None,
-    lang_code_id: str = "ko",
+    lang_code_id: str = "en",
     max_places: Optional[int] = None,
     delay_between_pages: float = 0.5
 ) -> List[Dict]:

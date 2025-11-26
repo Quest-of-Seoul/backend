@@ -12,16 +12,17 @@ router = APIRouter()
 
 
 # 카테고리 매핑 (프론트엔드 → DB)
+# DB에 저장되는 카테고리는 영문 카테고리명 그대로 사용 (Attractions, History, Culture 등)
 CATEGORY_MAPPING = {
-    "Attractions": ["Attraction"],
-    "History": ["Historic Site"],
-    "Culture": ["Cultural Village", "문화"],
-    "Nature": ["Nature", "자연"],
-    "Food": ["Food", "음식"],
-    "Drinks": ["Drinks", "음료"],
-    "Shopping": ["Shopping", "쇼핑"],
-    "Activities": ["Activities", "활동"],
-    "Events": ["Events", "이벤트"],
+    "Attractions": ["Attractions"],
+    "History": ["History"],
+    "Culture": ["Culture"],
+    "Nature": ["Nature"],
+    "Food": ["Food"],
+    "Drinks": ["Drinks"],
+    "Shopping": ["Shopping"],
+    "Activities": ["Activities"],
+    "Events": ["Events"],
 }
 
 

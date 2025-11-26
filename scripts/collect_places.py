@@ -166,7 +166,7 @@ def collect_category_places(
         logger.info(f"Step 1: Collecting VISIT SEOUL places for {category}...")
         # 카테고리를 VISIT SEOUL category_sn 리스트로 매핑
         from services.visit_seoul_api import map_category_to_visit_seoul_sn
-        visit_seoul_category_sns = map_category_to_visit_seoul_sn(category)
+        visit_seoul_category_sns = map_category_to_visit_seoul_sn(category, lang_code_id=lang_code_id)
         
         visit_seoul_items_by_cid: Dict[str, Dict] = {}
         if visit_seoul_category_sns:
