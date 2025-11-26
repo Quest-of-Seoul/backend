@@ -1,6 +1,6 @@
 """Recommendation Router"""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 import base64
@@ -14,6 +14,7 @@ from services.optimized_search import (
     get_quest_places_by_category
 )
 from services.db import get_db
+from services.auth_deps import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -85,7 +86,6 @@ def format_quest_response_with_place(
 
 
 class RecommendRequest(BaseModel):
-    user_id: str
     image: str
     latitude: Optional[float] = None
     longitude: Optional[float] = None
@@ -95,10 +95,10 @@ class RecommendRequest(BaseModel):
 
 
 @router.post("/similar-places")
-async def recommend_similar_places(request: RecommendRequest):
+async def recommend_similar_places(request: RecommendRequest, user_id: str = Depends(get_current_user_id)):
     """Image-based place recommendation with GPS filtering"""
     try:
-        logger.info(f"Recommendation: user={request.user_id}, GPS=({request.latitude}, {request.longitude})")
+        logger.info(f"Recommendation: user={user_id}, GPS=({request.latitude}, {request.longitude})")
         
         try:
             image_bytes = base64.b64decode(request.image)
@@ -323,9 +323,9 @@ async def get_quest_detail(quest_id: str):
 @router.post("/quests/{quest_id}/submit")
 async def submit_quiz_answer(
     quest_id: str,
-    user_id: str,
     quiz_id: str,
-    answer: int
+    answer: int,
+    user_id: str = Depends(get_current_user_id)
 ):
     """Submit quiz answer"""
     try:

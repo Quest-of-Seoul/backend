@@ -1,6 +1,6 @@
 """Docent Router"""
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
@@ -9,13 +9,13 @@ import logging
 from services.ai import generate_docent_message, generate_quiz
 from services.tts import text_to_speech, text_to_speech_url, text_to_speech_bytes
 from services.db import get_db
+from services.auth_deps import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 class DocentRequest(BaseModel):
-    user_id: str
     landmark: str
     user_message: Optional[str] = None
     language: str = "ko"
@@ -30,7 +30,7 @@ class TTSRequest(BaseModel):
 
 
 @router.post("/chat")
-async def chat_with_docent(request: DocentRequest):
+async def chat_with_docent(request: DocentRequest, user_id: str = Depends(get_current_user_id)):
     """AI docent chat with TTS support"""
     try:
         logger.info(f"Docent chat: {request.landmark} (TTS: {request.enable_tts})")
@@ -66,7 +66,7 @@ async def chat_with_docent(request: DocentRequest):
         try:
             db = get_db()
             db.table("chat_logs").insert({
-                "user_id": request.user_id,
+                "user_id": user_id,
                 "landmark": request.landmark,
                 "user_message": request.user_message or "",
                 "ai_response": ai_response
@@ -148,8 +148,8 @@ async def generate_tts(request: TTSRequest):
         raise HTTPException(status_code=500, detail=f"Error generating TTS: {str(e)}")
 
 
-@router.get("/history/{user_id}")
-async def get_chat_history(user_id: str, limit: int = 10):
+@router.get("/history")
+async def get_chat_history(limit: int = 10, user_id: str = Depends(get_current_user_id)):
     """Get user's chat history"""
     try:
         db = get_db()

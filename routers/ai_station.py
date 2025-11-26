@@ -1,6 +1,6 @@
 """AI Station Router - 채팅 리스트 및 통합 기능"""
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import base64
@@ -15,20 +15,13 @@ from services.pinecone_store import search_similar_pinecone
 from services.stt import speech_to_text_from_base64, speech_to_text
 from services.tts import text_to_speech_url, text_to_speech
 from services.storage import compress_and_upload_image
+from services.auth_deps import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class ChatListRequest(BaseModel):
-    user_id: str
-    mode: Optional[str] = None  # 'explore' or 'quest'
-    function_type: Optional[str] = None  # 'rag_chat', 'vlm_chat', 'route_recommend', 'image_similarity'
-    limit: int = 20
-
-
 class ExploreRAGChatRequest(BaseModel):
-    user_id: str
     user_message: str
     language: str = "ko"
     prefer_url: bool = False
@@ -37,7 +30,6 @@ class ExploreRAGChatRequest(BaseModel):
 
 
 class QuestRAGChatRequest(BaseModel):
-    user_id: str
     quest_id: int
     user_message: str
     landmark: Optional[str] = None
@@ -48,7 +40,6 @@ class QuestRAGChatRequest(BaseModel):
 
 
 class QuestVLMChatRequest(BaseModel):
-    user_id: str
     quest_id: int
     image: str  # base64
     user_message: Optional[str] = None
@@ -59,14 +50,12 @@ class QuestVLMChatRequest(BaseModel):
 
 
 class STTTTSRequest(BaseModel):
-    user_id: str
     audio: str  # base64 encoded audio
     language_code: str = "ko-KR"
     prefer_url: bool = False
 
 
 class RouteRecommendRequest(BaseModel):
-    user_id: str
     preferences: dict  # 사용자 취향 정보
     must_visit_place_id: Optional[str] = None
     latitude: Optional[float] = None
@@ -162,10 +151,10 @@ def build_quest_context_block(quest: Dict[str, Any]) -> str:
 
 @router.get("/chat-list")
 async def get_chat_list(
-    user_id: str,
-    limit: int = 20,
-    mode: Optional[str] = None,
-    function_type: Optional[str] = None
+    limit: int = Query(20),
+    mode: Optional[str] = Query(None),
+    function_type: Optional[str] = Query(None),
+    user_id: str = Depends(get_current_user_id)
 ):
     """
     채팅 리스트 조회 (하프 모달용)
@@ -240,7 +229,7 @@ async def get_chat_list(
 
 
 @router.get("/chat-session/{session_id}")
-async def get_chat_session(session_id: str, user_id: str):
+async def get_chat_session(session_id: str, user_id: str = Depends(get_current_user_id)):
     """
     특정 세션의 채팅 내역 조회
     사용자가 히스토리에서 세션을 클릭했을 때 전체 대화 내용을 반환
@@ -291,13 +280,13 @@ async def get_chat_session(session_id: str, user_id: str):
 
 
 @router.post("/explore/rag-chat")
-async def explore_rag_chat(request: ExploreRAGChatRequest):
+async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depends(get_current_user_id)):
     """
     탐색 모드 - 일반 RAG 채팅 (텍스트만 저장)
     Pinecone에 저장된 장소 description을 RAG로 검색하여 답변 생성
     """
     try:
-        logger.info(f"Explore RAG chat: {request.user_id}")
+        logger.info(f"Explore RAG chat: {user_id}")
         
         # 세션 ID 생성 또는 기존 사용
         session_id = request.chat_session_id
@@ -366,7 +355,7 @@ async def explore_rag_chat(request: ExploreRAGChatRequest):
                 title = request.user_message[:50]  # 첫 질문을 제목으로 사용
             
             db.table("chat_logs").insert({
-                "user_id": request.user_id,
+                "user_id": user_id,
                 "user_message": request.user_message,
                 "ai_response": ai_response,
                 "mode": "explore",
@@ -397,7 +386,7 @@ async def explore_rag_chat(request: ExploreRAGChatRequest):
 
 
 @router.post("/quest/rag-chat")
-async def quest_rag_chat(request: QuestRAGChatRequest):
+async def quest_rag_chat(request: QuestRAGChatRequest, user_id: str = Depends(get_current_user_id)):
     """
     퀘스트 모드 - 일반 RAG 채팅 (이미지+텍스트 저장 가능)
     """
@@ -405,9 +394,9 @@ async def quest_rag_chat(request: QuestRAGChatRequest):
         if not request.quest_id:
             raise HTTPException(status_code=400, detail="quest_id is required for quest chat")
 
-        logger.info(f"Quest RAG chat: user={request.user_id}, quest={request.quest_id}")
+        logger.info(f"Quest RAG chat: user={user_id}, quest={request.quest_id}")
         db = get_db()
-        ensure_user_exists(request.user_id)
+        ensure_user_exists(user_id)
         quest = fetch_quest_context(request.quest_id, db=db)
 
         session_id = request.chat_session_id or str(uuid.uuid4())
@@ -455,7 +444,7 @@ async def quest_rag_chat(request: QuestRAGChatRequest):
             title_value = quest.get("name") or quest.get("title") or landmark
             
             db.table("chat_logs").insert({
-                "user_id": request.user_id,
+                "user_id": user_id,
                 "user_message": request.user_message,
                 "ai_response": ai_response,
                 "mode": "quest",
@@ -489,7 +478,7 @@ async def quest_rag_chat(request: QuestRAGChatRequest):
 
 
 @router.post("/quest/vlm-chat")
-async def quest_vlm_chat(request: QuestVLMChatRequest):
+async def quest_vlm_chat(request: QuestVLMChatRequest, user_id: str = Depends(get_current_user_id)):
     """
     퀘스트 모드 - VLM 채팅 (이미지+텍스트 저장)
     """
@@ -497,9 +486,9 @@ async def quest_vlm_chat(request: QuestVLMChatRequest):
         if not request.quest_id:
             raise HTTPException(status_code=400, detail="quest_id is required for quest VLM chat")
 
-        logger.info(f"Quest VLM chat: user={request.user_id}, quest={request.quest_id}")
+        logger.info(f"Quest VLM chat: user={user_id}, quest={request.quest_id}")
         db = get_db()
-        ensure_user_exists(request.user_id)
+        ensure_user_exists(user_id)
         
         session_id = request.chat_session_id or str(uuid.uuid4())
         quest = fetch_quest_context(request.quest_id, db=db)
@@ -602,7 +591,7 @@ VLM 분석 결과:
             is_first_message = not existing_session.data
             title_value = quest.get("name") or quest.get("title")
             db.table("chat_logs").insert({
-                "user_id": request.user_id,
+                "user_id": user_id,
                 "user_message": request.user_message or "이미지 기반 질문",
                 "ai_response": ai_response,
                 "mode": "quest",
@@ -638,13 +627,13 @@ VLM 분석 결과:
 
 
 @router.post("/stt-tts")
-async def stt_and_tts(request: STTTTSRequest):
+async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current_user_id)):
     """
     STT + TTS 통합 엔드포인트
     오디오를 받아서 텍스트로 변환하고, 그 텍스트를 다시 음성으로 변환
     """
     try:
-        logger.info(f"STT+TTS request: {request.user_id}")
+        logger.info(f"STT+TTS request: {user_id}")
         
         # STT: 오디오를 텍스트로 변환
         transcribed_text = speech_to_text_from_base64(
@@ -689,13 +678,13 @@ async def stt_and_tts(request: STTTTSRequest):
 
 
 @router.post("/route-recommend")
-async def recommend_route(request: RouteRecommendRequest):
+async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends(get_current_user_id)):
     """
     여행지 경로 추천
     사전 질문을 통해 사용자 취향을 파악하고, 4개의 퀘스트를 추천
     """
     try:
-        logger.info(f"Route recommend: {request.user_id}")
+        logger.info(f"Route recommend: {user_id}")
         
         db = get_db()
         
@@ -763,7 +752,7 @@ async def recommend_route(request: RouteRecommendRequest):
         # 채팅 기록 저장 (여행 일정 - 보기 전용)
         try:
             db.table("chat_logs").insert({
-                "user_id": request.user_id,
+                "user_id": user_id,
                 "user_message": f"경로 추천 요청: {request.preferences}",
                 "ai_response": f"{len(recommended_quests)}개의 퀘스트를 추천했습니다.",
                 "mode": "explore",

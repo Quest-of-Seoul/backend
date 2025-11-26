@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) NOT NULL UNIQUE,
     nickname VARCHAR(100),
+    password_hash VARCHAR(255),
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -141,7 +142,7 @@ CREATE INDEX idx_user_quests_status ON user_quests(status);
 -- User Quest Progress Table
 CREATE TABLE IF NOT EXISTS user_quest_progress (
     id SERIAL PRIMARY KEY,
-    user_id UUID NOT NULL,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     quest_id INTEGER NOT NULL REFERENCES quests(id) ON DELETE CASCADE,
     status VARCHAR(20) DEFAULT 'in_progress',
     quiz_attempts INTEGER DEFAULT 0,
@@ -546,6 +547,7 @@ $$ LANGUAGE plpgsql;
 
 -- Table Comments
 COMMENT ON TABLE users IS '사용자 정보';
+COMMENT ON COLUMN users.password_hash IS 'bcrypt hashed password for authentication';
 COMMENT ON TABLE places IS 'AR 카메라로 촬영 가능한 서울 주요 장소 정보';
 COMMENT ON TABLE quests IS '장소 기반 퀘스트 (VLM places 연동 가능)';
 COMMENT ON TABLE quest_quizzes IS '퀘스트별 객관식 퀴즈';

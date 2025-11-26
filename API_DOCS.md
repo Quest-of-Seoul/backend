@@ -12,48 +12,71 @@ Production: `https://your-domain.com`
 
 ## Authentication
 
-현재 인증 없음 (향후 API Key 또는 JWT 추가 예정)
+JWT Bearer 토큰 기반 인증을 사용합니다.
+
+### 인증 방법
+
+1. **회원가입** (`POST /auth/signup`) 또는 **로그인** (`POST /auth/login`)을 통해 `access_token`을 받습니다.
+2. 인증이 필요한 API 요청 시 `Authorization` 헤더에 토큰을 포함합니다:
+   ```
+   Authorization: Bearer <access_token>
+   ```
+
+### 인증 엔드포인트
+
+- `POST /auth/signup` - 회원가입
+- `POST /auth/login` - 로그인
+- `GET /auth/me` - 현재 사용자 정보 조회
+- `POST /auth/refresh` - 토큰 갱신
+
+자세한 내용은 아래 "Authentication Endpoints" 섹션을 참조하세요.
 
 ---
 
 ## Endpoints Overview
 
+### Authentication (인증)
+- POST `/auth/signup` - 회원가입
+- POST `/auth/login` - 로그인
+- GET `/auth/me` - 현재 사용자 정보 조회
+- POST `/auth/refresh` - 토큰 갱신
+
 ### Docent (AI 도슨트)
-- POST `/docent/chat` - AI 도슨트 대화
+- POST `/docent/chat` - AI 도슨트 대화 (인증 필요)
 - POST `/docent/quiz` - 퀴즈 생성
 - POST `/docent/tts` - TTS 생성
-- GET `/docent/history/{user_id}` - 대화 기록 조회
+- GET `/docent/history` - 대화 기록 조회 (인증 필요)
 - WebSocket `/docent/ws/tts` - TTS 스트리밍
 - WebSocket `/docent/ws/chat` - 채팅 스트리밍
 
 ### Quest (퀘스트 관리)
 - GET `/quest/list` - 퀘스트 목록
 - POST `/quest/nearby` - 주변 퀘스트 검색
-- POST `/quest/start` - 퀘스트 시작/재개 (place_id 연결)
-- POST `/quest/progress` - 진행 상황 업데이트
-- GET `/quest/user/{user_id}` - 사용자 퀘스트 조회
-- GET `/quest/{quest_id}` - 퀘스트 상세 정보 (+ 사용자 포인트/상태)
+- POST `/quest/start` - 퀘스트 시작/재개 (인증 필요)
+- POST `/quest/progress` - 진행 상황 업데이트 (인증 필요)
+- GET `/quest/user` - 사용자 퀘스트 조회 (인증 필요)
+- GET `/quest/{quest_id}` - 퀘스트 상세 정보 (+ 사용자 포인트/상태, 선택적 인증)
 - GET `/quest/{quest_id}/quizzes` - 퀘스트 연동 퀴즈 조회
-- POST `/quest/{quest_id}/quizzes/{quiz_id}/submit` - 퀴즈 제출 및 포인트 적립
+- POST `/quest/{quest_id}/quizzes/{quiz_id}/submit` - 퀴즈 제출 및 포인트 적립 (인증 필요)
 
 ### Reward (리워드 시스템)
-- GET `/reward/points/{user_id}` - 포인트 조회
-- POST `/reward/points/add` - 포인트 추가
+- GET `/reward/points` - 포인트 조회 (인증 필요)
+- POST `/reward/points/add` - 포인트 추가 (인증 필요)
 - GET `/reward/list` - 리워드 목록
-- POST `/reward/claim` - 리워드 획득
-- GET `/reward/claimed/{user_id}` - 획득한 리워드 조회
-- POST `/reward/use/{reward_id}` - 리워드 사용
+- POST `/reward/claim` - 리워드 획득 (인증 필요)
+- GET `/reward/claimed` - 획득한 리워드 조회 (인증 필요)
+- POST `/reward/use/{reward_id}` - 리워드 사용 (인증 필요)
 
 ### VLM (이미지 분석)
-- POST `/vlm/analyze` - 이미지 분석
-- POST `/vlm/analyze-multipart` - 멀티파트 이미지 분석
+- POST `/vlm/analyze` - 이미지 분석 (인증 필요)
+- POST `/vlm/analyze-multipart` - 멀티파트 이미지 분석 (인증 필요)
 - POST `/vlm/similar` - 유사 이미지 검색
 - POST `/vlm/embed` - 임베딩 생성 (관리자)
 - GET `/vlm/places/nearby` - 주변 장소 조회
 - GET `/vlm/health` - 서비스 상태 확인
 
 ### Recommend (추천 시스템)
-- POST `/recommend/similar-places` - 장소 추천
+- POST `/recommend/similar-places` - 장소 추천 (인증 필요)
 - GET `/recommend/nearby-quests` - 주변 퀘스트 추천
 - GET `/recommend/quests/category/{category}` - 카테고리별 퀘스트
 - GET `/recommend/quests/high-reward` - 포인트가 높은 퀘스트 추천
@@ -65,17 +88,115 @@ Production: `https://your-domain.com`
 ### Map (맵 검색 및 필터)
 - POST `/map/search` - 장소명으로 퀘스트/장소 검색
 - POST `/map/filter` - 필터 조건으로 퀘스트/장소 검색
-- GET `/map/stats/{user_id}` - 맵 헤더 통계 조회
-- POST `/map/stats/walk-distance` - 선택한 퀘스트 루트의 총 거리 계산
+- GET `/map/stats` - 맵 헤더 통계 조회 (인증 필요)
+- POST `/map/stats/walk-distance` - 선택한 퀘스트 루트의 총 거리 계산 (인증 필요)
 
 ### AI Station (AI Station 통합 기능)
-- GET `/ai-station/chat-list` - 채팅 리스트 조회 (탐험/퀘스트 모드 필터 지원)
-- GET `/ai-station/chat-session/{session_id}` - 특정 세션의 채팅 내역 조회
-- POST `/ai-station/explore/rag-chat` - 일반 채팅 (히스토리 저장, 첫 질문이 제목)
-- POST `/ai-station/quest/rag-chat` - 퀘스트 모드 채팅 (퀘스트 정보 context, 히스토리 조회 전용)
-- POST `/ai-station/quest/vlm-chat` - 퀘스트 모드 VLM 채팅 (퀘스트 정보 context, 히스토리 조회 전용)
-- POST `/ai-station/stt-tts` - STT + TTS 통합 (음성 입력 → 텍스트 → 음성 출력)
-- POST `/ai-station/route-recommend` - 여행 일정 추천 (히스토리 저장, 보기 전용, 테마가 제목)
+- GET `/ai-station/chat-list` - 채팅 리스트 조회 (인증 필요)
+- GET `/ai-station/chat-session/{session_id}` - 특정 세션의 채팅 내역 조회 (인증 필요)
+- POST `/ai-station/explore/rag-chat` - 일반 채팅 (인증 필요)
+- POST `/ai-station/quest/rag-chat` - 퀘스트 모드 채팅 (인증 필요)
+- POST `/ai-station/quest/vlm-chat` - 퀘스트 모드 VLM 채팅 (인증 필요)
+- POST `/ai-station/stt-tts` - STT + TTS 통합 (인증 필요)
+- POST `/ai-station/route-recommend` - 여행 일정 추천 (인증 필요)
+
+---
+
+## Authentication Endpoints
+
+### POST /auth/signup
+
+회원가입
+
+**Request Body:**
+
+```json
+{
+  "email": "user@example.com",
+  "password": "securepassword",
+  "nickname": "사용자"
+}
+```
+
+**Response:**
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "user_id": "uuid-here",
+  "email": "user@example.com",
+  "nickname": "사용자"
+}
+```
+
+---
+
+### POST /auth/login
+
+로그인
+
+**Request Body:**
+
+```json
+{
+  "email": "user@example.com",
+  "password": "securepassword"
+}
+```
+
+**Response:**
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "user_id": "uuid-here",
+  "email": "user@example.com",
+  "nickname": "사용자"
+}
+```
+
+---
+
+### GET /auth/me
+
+현재 로그인한 사용자 정보 조회
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Response:**
+
+```json
+{
+  "user_id": "uuid-here",
+  "email": "user@example.com",
+  "nickname": "사용자",
+  "joined_at": "2024-01-01T12:00:00Z"
+}
+```
+
+---
+
+### POST /auth/refresh
+
+토큰 갱신
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Response:**
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "user_id": "uuid-here",
+  "email": "user@example.com",
+  "nickname": "사용자"
+}
+```
 
 ---
 
@@ -85,11 +206,13 @@ Production: `https://your-domain.com`
 
 AI 도슨트와 대화
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "landmark": "경복궁",
   "user_message": "근정전에 대해 알려줘",
   "language": "ko",
@@ -102,7 +225,6 @@ AI 도슨트와 대화
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 | landmark | string | 필수 | 장소명 |
 | user_message | string | 선택 | 사용자 질문 |
 | language | string | 선택 | 언어 (ko/en, 기본: ko) |
@@ -184,15 +306,12 @@ AI 도슨트와 대화
 
 ---
 
-### GET /docent/history/{user_id}
+### GET /docent/history
 
 사용자 대화 기록 조회
 
-**Path Parameters:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
 
 **Query Parameters:**
 
@@ -239,6 +358,8 @@ TTS 스트리밍
 ### WebSocket /docent/ws/chat
 
 채팅 + TTS 스트리밍
+
+**Note:** WebSocket은 현재 메시지에 `user_id`를 포함하는 방식을 사용합니다. 향후 토큰 기반 인증으로 업그레이드 예정입니다.
 
 **Send Message:**
 
@@ -343,11 +464,13 @@ TTS 스트리밍
 
 사용자가 특정 장소 1km 이내에서 퀘스트를 시작(또는 재개)할 때 호출합니다. `user_quests`와 `user_quest_progress`가 동시에 초기화되고, 이후 퀘스트 챗/퀴즈 API에서 재사용할 `quest_id`와 `place_id`를 돌려줍니다.
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "quest_id": 1
 }
 ```
@@ -388,11 +511,13 @@ TTS 스트리밍
 
 퀘스트 진행 상황 업데이트
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "quest_id": 1,
   "status": "completed"
 }
@@ -402,7 +527,6 @@ TTS 스트리밍
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 | quest_id | integer | 필수 | 퀘스트 ID |
 | status | string | 필수 | 상태 (in_progress/completed/failed) |
 
@@ -431,15 +555,12 @@ TTS 스트리밍
 
 ---
 
-### GET /quest/user/{user_id}
+### GET /quest/user
 
 사용자 퀘스트 조회
 
-**Path Parameters:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
 
 **Query Parameters:**
 
@@ -544,11 +665,13 @@ TTS 스트리밍
 
 퀘스트와 연결된 퀴즈를 제출하고 포인트를 적립합니다. 정답일 때만 `user_quests` 상태가 `completed`로 바뀌고 퀘스트 포인트가 `points` 테이블에 적립됩니다.
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "answer": 0
 }
 ```
@@ -585,15 +708,12 @@ TTS 스트리밍
 
 ## Reward Endpoints
 
-### GET /reward/points/{user_id}
+### GET /reward/points
 
 사용자 포인트 조회
 
-**Path Parameters:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
 
 **Response:**
 
@@ -618,11 +738,13 @@ TTS 스트리밍
 
 포인트 추가
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "points": 50,
   "reason": "Quest completion"
 }
@@ -632,7 +754,6 @@ TTS 스트리밍
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 | points | integer | 필수 | 포인트 (양수) |
 | reason | string | 선택 | 사유 (기본: "Quest completion") |
 
@@ -679,11 +800,13 @@ TTS 스트리밍
 
 리워드 획득
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "reward_id": 1
 }
 ```
@@ -692,7 +815,6 @@ TTS 스트리밍
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 | reward_id | integer | 필수 | 리워드 ID |
 
 **Response (성공):**
@@ -721,15 +843,12 @@ TTS 스트리밍
 
 ---
 
-### GET /reward/claimed/{user_id}
+### GET /reward/claimed
 
 획득한 리워드 조회
 
-**Path Parameters:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
 
 **Response:**
 
@@ -758,17 +877,14 @@ TTS 스트리밍
 
 리워드 사용 처리
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Path Parameters:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | reward_id | integer | 필수 | 리워드 ID |
-
-**Query Parameters:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 
 **Response:**
 
@@ -787,11 +903,13 @@ TTS 스트리밍
 
 이미지 분석 및 장소 인식
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "image": "base64_encoded_image",
   "latitude": 37.5796,
   "longitude": 126.9770,
@@ -806,7 +924,6 @@ TTS 스트리밍
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 | image | string | 필수 | Base64 인코딩 이미지 |
 | latitude | float | 선택 | 위도 |
 | longitude | float | 선택 | 경도 |
@@ -854,11 +971,13 @@ TTS 스트리밍
 
 멀티파트 폼 데이터로 이미지 분석
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Form Data:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 | image | file | 필수 | 이미지 파일 |
 | latitude | float | 선택 | 위도 |
 | longitude | float | 선택 | 경도 |
@@ -1002,11 +1121,13 @@ VLM 서비스 상태 확인
 
 이미지 기반 장소 추천
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "image": "base64_encoded_image",
   "latitude": 37.5796,
   "longitude": 126.9770,
@@ -1020,7 +1141,6 @@ VLM 서비스 상태 확인
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 | image | string | 필수 | Base64 인코딩 이미지 |
 | latitude | float | 선택 | 위도 |
 | longitude | float | 선택 | 경도 |
@@ -1301,6 +1421,9 @@ VLM 서비스 상태 확인
 
 퀴즈 답안 제출
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Path Parameters:**
 
 | Field | Type | Required | Description |
@@ -1311,9 +1434,10 @@ VLM 서비스 상태 확인
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 | quiz_id | string | 필수 | 퀴즈 ID |
 | answer | integer | 필수 | 답안 (0-3) |
+
+**Note:** 이 엔드포인트는 `/quest/{quest_id}/quizzes/{quiz_id}/submit`을 사용하는 것을 권장합니다.
 
 **Response (정답):**
 
@@ -1502,15 +1626,12 @@ VLM 서비스 상태 확인
 
 ---
 
-### GET /map/stats/{user_id}
+### GET /map/stats
 
 맵 헤더에 표시할 사용자 통계 조회
 
-**Path Parameters:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
 
 **Query Parameters:**
 
@@ -1562,11 +1683,13 @@ VLM 서비스 상태 확인
 
 선택한 퀘스트 루트의 총 거리 계산 (walk 거리만)
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "quest_ids": [1, 2, 3],
   "user_latitude": 37.5665,
   "user_longitude": 126.9780
@@ -1577,7 +1700,6 @@ VLM 서비스 상태 확인
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 | quest_ids | array[integer] | 필수 | 선택한 퀘스트 ID 목록 (순서대로) |
 | user_latitude | float | 필수 | 사용자 현재 위도 |
 | user_longitude | float | 필수 | 사용자 현재 경도 |
@@ -1643,11 +1765,13 @@ VLM 서비스 상태 확인
 
 탐험/퀘스트 모드를 아우르는 채팅 리스트 조회 (하프 모달용). `mode`와 `function_type`을 조합해서 필요한 탭만 불러올 수 있습니다.
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Query Parameters:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 | limit | integer | 선택 | 결과 개수 (기본: 20) |
 | mode | string | 선택 | `explore`, `quest` 중 선택 |
 | function_type | string | 선택 | `rag_chat`, `vlm_chat`, `route_recommend` |
@@ -1721,17 +1845,14 @@ VLM 서비스 상태 확인
 
 특정 세션의 채팅 내역 조회
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Path Parameters:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | session_id | string | 필수 | 세션 ID |
-
-**Query Parameters:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| user_id | string | 필수 | 사용자 ID |
 
 **Response:**
 
@@ -1772,11 +1893,13 @@ VLM 서비스 상태 확인
 - 첫 번째 질문이 세션 제목으로 사용됨
 - 다시 들어와서 이어서 대화 가능
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "user_message": "경복궁 근정전에 대해 알려줘",
   "language": "ko",
   "prefer_url": false,
@@ -1808,11 +1931,13 @@ VLM 서비스 상태 확인
 
 퀘스트 모드 - 장소 메타데이터를 context로 사용하는 LLM 채팅. 세션은 자동 생성되며 히스토리에 **조회 전용**으로 저장됩니다.
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "quest_id": 1,
   "user_message": "이 장소의 역사를 알려줘",
   "language": "ko",
@@ -1845,11 +1970,13 @@ VLM 서비스 상태 확인
 
 퀘스트 모드 - VLM 채팅. 사용자가 업로드한 이미지를 분석하고, 현재 진행 중인 퀘스트 장소 정보와 결합하여 설명합니다. 결과는 히스토리에 **조회 전용**으로 저장됩니다.
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "quest_id": 1,
   "image": "base64_encoded_image",
   "user_message": "이 장소가 뭐야?",
@@ -1888,11 +2015,13 @@ VLM 서비스 상태 확인
 
 STT + TTS 통합 엔드포인트
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "audio": "base64_encoded_audio",
   "language_code": "ko-KR",
   "prefer_url": false
@@ -1919,11 +2048,13 @@ STT + TTS 통합 엔드포인트
 - 테마가 세션 제목으로 사용됨
 - 다시 들어와서 수정 불가, 보기만 가능
 
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
 **Request Body:**
 
 ```json
 {
-  "user_id": "user-123",
   "preferences": {
     "theme": "역사유적 탐방",
     "category": "역사유적",

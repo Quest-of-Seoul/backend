@@ -1,9 +1,10 @@
 """Quest Router"""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from services.db import get_db, ensure_user_exists
+from services.auth_deps import get_current_user_id, get_current_user_id_optional
 from datetime import datetime
 import math
 import logging
@@ -29,18 +30,15 @@ def get_quest_with_place(db, quest_id: int) -> Dict[str, Any]:
 
 
 class QuestProgressRequest(BaseModel):
-    user_id: str
     quest_id: int
     status: str  # 'in_progress', 'completed', 'failed'
 
 
 class QuestStartRequest(BaseModel):
-    user_id: str
     quest_id: int
 
 
 class QuestQuizAnswerRequest(BaseModel):
-    user_id: str
     answer: int
 
 
@@ -178,18 +176,18 @@ async def get_nearby_quests(request: NearbyQuestRequest):
 
 
 @router.post("/start")
-async def start_quest(request: QuestStartRequest):
+async def start_quest(request: QuestStartRequest, user_id: str = Depends(get_current_user_id)):
     """
     Start or resume a quest for a user. Returns quest/place metadata for downstream quiz/chat usage.
     """
     try:
         db = get_db()
         quest = get_quest_with_place(db, request.quest_id)
-        ensure_user_exists(request.user_id)
+        ensure_user_exists(user_id)
 
         existing = db.table("user_quests") \
             .select("*") \
-            .eq("user_id", request.user_id) \
+            .eq("user_id", user_id) \
             .eq("quest_id", request.quest_id) \
             .execute()
 
@@ -198,7 +196,7 @@ async def start_quest(request: QuestStartRequest):
             status = user_quest.get("status", "in_progress")
         else:
             insert_result = db.table("user_quests").insert({
-                "user_id": request.user_id,
+                "user_id": user_id,
                 "quest_id": request.quest_id,
                 "status": "in_progress",
                 "started_at": datetime.now().isoformat()
@@ -210,7 +208,7 @@ async def start_quest(request: QuestStartRequest):
 
         # Mirror progress row for quiz tracking
         db.table("user_quest_progress").upsert({
-            "user_id": request.user_id,
+            "user_id": user_id,
             "quest_id": request.quest_id,
             "status": status
         }).execute()
@@ -233,7 +231,7 @@ async def start_quest(request: QuestStartRequest):
 
 
 @router.post("/progress")
-async def update_quest_progress(request: QuestProgressRequest):
+async def update_quest_progress(request: QuestProgressRequest, user_id: str = Depends(get_current_user_id)):
     """
     Update user's quest progress
     """
@@ -248,7 +246,7 @@ async def update_quest_progress(request: QuestProgressRequest):
         # Check if user_quest record exists
         existing = db.table("user_quests") \
             .select("*") \
-            .eq("user_id", request.user_id) \
+            .eq("user_id", user_id) \
             .eq("quest_id", request.quest_id) \
             .execute()
 
@@ -260,13 +258,13 @@ async def update_quest_progress(request: QuestProgressRequest):
 
             db.table("user_quests") \
                 .update(update_data) \
-                .eq("user_id", request.user_id) \
+                .eq("user_id", user_id) \
                 .eq("quest_id", request.quest_id) \
                 .execute()
         else:
             # Create new record
             insert_data = {
-                "user_id": request.user_id,
+                "user_id": user_id,
                 "quest_id": request.quest_id,
                 "status": request.status
             }
@@ -285,7 +283,7 @@ async def update_quest_progress(request: QuestProgressRequest):
                 }
             reward_points = quest.data[0]['reward_point']
             db.table("points").insert({
-                "user_id": request.user_id,
+                "user_id": user_id,
                 "value": reward_points,
                 "reason": f"Completed quest: {quest.data[0]['name']}"
             }).execute()
@@ -307,8 +305,8 @@ async def update_quest_progress(request: QuestProgressRequest):
         raise HTTPException(status_code=500, detail=f"Error updating quest progress: {str(e)}")
 
 
-@router.get("/user/{user_id}")
-async def get_user_quests(user_id: str, status: Optional[str] = None):
+@router.get("/user")
+async def get_user_quests(status: Optional[str] = None, user_id: str = Depends(get_current_user_id)):
     """
     Get user's quests, optionally filtered by status
     """
@@ -333,7 +331,7 @@ async def get_user_quests(user_id: str, status: Optional[str] = None):
 
 
 @router.get("/{quest_id}")
-async def get_quest_detail(quest_id: int, user_id: Optional[str] = None):
+async def get_quest_detail(quest_id: int, user_id: Optional[str] = Depends(get_current_user_id_optional)):
     """
     Get detailed information about a specific quest
     """
@@ -405,13 +403,13 @@ async def get_quest_quizzes(quest_id: int):
 
 
 @router.post("/{quest_id}/quizzes/{quiz_id}/submit")
-async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswerRequest):
+async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswerRequest, user_id: str = Depends(get_current_user_id)):
     """
     Submit quiz answer, update user quest status, and award points when the quiz tied to the quest is cleared.
     """
     try:
         db = get_db()
-        ensure_user_exists(request.user_id)
+        ensure_user_exists(user_id)
 
         quiz_result = db.table("quest_quizzes") \
             .select("*") \
@@ -429,7 +427,7 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
         # Update progress attempts
         progress_result = db.table("user_quest_progress") \
             .select("*") \
-            .eq("user_id", request.user_id) \
+            .eq("user_id", user_id) \
             .eq("quest_id", quest_id) \
             .limit(1) \
             .execute()
@@ -439,7 +437,7 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
             attempts = (progress_result.data[0].get("quiz_attempts", 0) or 0) + 1
 
         db.table("user_quest_progress").upsert({
-            "user_id": request.user_id,
+            "user_id": user_id,
             "quest_id": quest_id,
             "quiz_attempts": attempts,
             "quiz_correct": is_correct,
@@ -457,7 +455,7 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
 
             user_quest = db.table("user_quests") \
                 .select("status") \
-                .eq("user_id", request.user_id) \
+                .eq("user_id", user_id) \
                 .eq("quest_id", quest_id) \
                 .limit(1) \
                 .execute()
@@ -465,17 +463,17 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
             already_completed = bool(user_quest.data and user_quest.data[0].get("status") == "completed")
 
             if already_completed:
-                logger.info(f"User {request.user_id} already completed quest {quest_id}, skipping award.")
+                logger.info(f"User {user_id} already completed quest {quest_id}, skipping award.")
             else:
                 timestamp = datetime.now().isoformat()
                 if user_quest.data:
                     db.table("user_quests").update({
                         "status": "completed",
                         "completed_at": timestamp
-                    }).eq("user_id", request.user_id).eq("quest_id", quest_id).execute()
+                    }).eq("user_id", user_id).eq("quest_id", quest_id).execute()
                 else:
                     db.table("user_quests").insert({
-                        "user_id": request.user_id,
+                        "user_id": user_id,
                         "quest_id": quest_id,
                         "status": "completed",
                         "started_at": timestamp,
@@ -485,12 +483,12 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
                 points_awarded = quest_data.get("reward_point", 0) if quest_data else 0
                 if points_awarded:
                     db.table("points").insert({
-                        "user_id": request.user_id,
+                        "user_id": user_id,
                         "value": points_awarded,
                         "reason": f"퀘스트 완료: {quest_data.get('name', '')}"
                     }).execute()
 
-            balance_result = db.rpc("get_user_points", {"user_uuid": request.user_id}).execute()
+            balance_result = db.rpc("get_user_points", {"user_uuid": user_id}).execute()
             new_balance = balance_result.data if balance_result.data is not None else 0
 
         return {

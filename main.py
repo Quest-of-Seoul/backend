@@ -9,7 +9,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import docent, quest, reward, vlm, recommend, map, ai_station
+from routers import docent, quest, reward, vlm, recommend, map, ai_station, auth
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,6 +34,10 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
     openapi_tags=[
+        {
+            "name": "Authentication",
+            "description": "User authentication: signup, login, token management"
+        },
         {
             "name": "Docent",
             "description": "AI-powered conversational tour guide with TTS support"
@@ -73,6 +77,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(docent.router, prefix="/docent", tags=["Docent"])
 app.include_router(quest.router, prefix="/quest", tags=["Quest"])
 app.include_router(reward.router, prefix="/reward", tags=["Reward"])
