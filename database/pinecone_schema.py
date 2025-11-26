@@ -42,8 +42,13 @@ class PineconeSchemaManager:
         logger.info(f"  {title}")
         logger.info("=" * 70)
     
-    def setup_pinecone_schema(self) -> bool:
-        """Setup Pinecone index and sample data"""
+    def setup_pinecone_schema(self, insert_sample_data: bool = True) -> bool:
+        """
+        Setup Pinecone index and optionally insert sample data
+        
+        Args:
+            insert_sample_data: Whether to insert sample data (default: True)
+        """
         self.print_header("Setup Pinecone Schema")
         
         try:
@@ -72,14 +77,14 @@ class PineconeSchemaManager:
             stats = index.describe_index_stats()
             vector_count = stats.get('total_vector_count', 0)
             
-            if vector_count == 0:
+            if vector_count == 0 and insert_sample_data:
                 logger.info("Inserting sample data...")
                 
                 sample_places = [
                     {
                         "place_id": "place-001-gyeongbokgung",
                         "place_name": "Gyeongbokgung Palace",
-                        "category": "Historic Site",
+                        "category": "History",
                         "image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
                         "latitude": 37.579617,
                         "longitude": 126.977041,
@@ -88,7 +93,7 @@ class PineconeSchemaManager:
                     {
                         "place_id": "place-002-namsan-tower",
                         "place_name": "N Seoul Tower",
-                        "category": "Attraction",
+                        "category": "Attractions",
                         "image_url": "https://ak-d.tripcdn.com/images/100v0z000000nkadwE2AA_C_1200_800_Q70.webp",
                         "latitude": 37.551169,
                         "longitude": 126.988227,
@@ -97,7 +102,7 @@ class PineconeSchemaManager:
                     {
                         "place_id": "place-003-gwanghwamun",
                         "place_name": "Gwanghwamun Square",
-                        "category": "Square",
+                        "category": "Attractions",
                         "image_url": "https://ak-d.tripcdn.com/images/01051120008c32dlbE44A.webp",
                         "latitude": 37.572889,
                         "longitude": 126.976849,
@@ -106,7 +111,7 @@ class PineconeSchemaManager:
                     {
                         "place_id": "place-004-myeongdong-cathedral",
                         "place_name": "Myeongdong Cathedral",
-                        "category": "Religious Site",
+                        "category": "Culture",
                         "image_url": "https://ak-d.tripcdn.com/images/100f1f000001gqchv1B53.webp",
                         "latitude": 37.563600,
                         "longitude": 126.986870,
@@ -115,7 +120,7 @@ class PineconeSchemaManager:
                     {
                         "place_id": "place-005-bukchon-hanok",
                         "place_name": "Bukchon Hanok Village",
-                        "category": "Cultural Village",
+                        "category": "Culture",
                         "image_url": "https://ak-d.tripcdn.com/images/100p11000000r4rhv9EF4.jpg",
                         "latitude": 37.582306,
                         "longitude": 126.985302,
@@ -160,6 +165,8 @@ class PineconeSchemaManager:
                 logger.info("Sample data inserted")
                 
                 time.sleep(2)
+            elif vector_count == 0 and not insert_sample_data:
+                logger.info("Skipping sample data insertion (insert_sample_data=False)")
             else:
                 logger.info(f"Data already exists ({vector_count} vectors)")
             
@@ -190,9 +197,20 @@ class PineconeSchemaManager:
 
 
 def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Setup Pinecone schema")
+    parser.add_argument(
+        "--no-sample-data",
+        action="store_true",
+        help="Skip inserting sample data"
+    )
+    
+    args = parser.parse_args()
+    
     try:
         manager = PineconeSchemaManager()
-        success = manager.setup_pinecone_schema()
+        success = manager.setup_pinecone_schema(insert_sample_data=not args.no_sample_data)
         sys.exit(0 if success else 1)
     
     except KeyboardInterrupt:

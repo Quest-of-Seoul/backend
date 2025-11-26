@@ -13,7 +13,8 @@ from services.visit_seoul_api import (
     collect_all_places_by_category as collect_visit_seoul_places,
     get_place_detail as get_visit_seoul_detail,
     parse_visit_seoul_place,
-    map_category_to_visit_seoul_sn
+    map_category_to_visit_seoul_sn,
+    CATEGORY_DATASET_INFO
 )
 from services.place_parser import merge_place_data
 from services.db import save_place, create_quest_from_place
@@ -29,6 +30,33 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+CATEGORY_TARGET_COUNTS: Dict[str, Optional[int]] = {
+    cat: info.get("total_count")
+    for cat, info in CATEGORY_DATASET_INFO.items()
+}
+
+
+def determine_target_count(category: str, requested_max: Optional[int]) -> Optional[int]:
+    """
+    CLI 입력과 사전 정의된 표 데이터를 고려해 목표 수집 개수를 계산
+    """
+    if requested_max is not None:
+        if requested_max <= 0:
+            return None
+        return requested_max
+    
+    return CATEGORY_TARGET_COUNTS.get(category)
+
+
+def normalize_cid(item: Dict) -> Optional[str]:
+    """VISIT SEOUL 아이템에서 CID 추출"""
+    return (
+        item.get("cid")
+        or item.get("contentId")
+        or item.get("content_id")
+        or item.get("id")
+    )
 
 
 def create_image_embedding_for_place(place_id: str, image_url: str) -> bool:
@@ -96,63 +124,112 @@ def create_image_embedding_for_place(place_id: str, image_url: str) -> bool:
 
 def collect_category_places(
     category: str,
-    max_places: int = 50,
+    max_places: Optional[int] = None,
     area_code: str = "1",
     delay_between_api_calls: float = 0.5,
-    create_embeddings: bool = True
+    create_embeddings: bool = True,
+    lang_code_id: str = "en"
 ) -> Dict:
     """
     카테고리별 장소 수집 및 저장
     
     Args:
         category: Quest of Seoul 테마 (Attraction, Culture 등)
-        max_places: 최대 수집 장소 수
+        max_places: 최대 수집 장소 수 (None이면 카테고리별 전체 수집)
         area_code: 지역코드 (서울: 1)
         delay_between_api_calls: API 호출 간 지연 시간 (초)
+        create_embeddings: 이미지 임베딩 생성 여부
+        lang_code_id: VISIT SEOUL 언어 코드
     
     Returns:
         수집 결과 통계
     """
     logger.info(f"=== Starting collection for category: {category} ===")
     
+    target_total = determine_target_count(category, max_places)
+    target_desc = target_total if target_total else "ALL"
+    logger.info(f"Configured target for {category}: {target_desc} item(s) (lang: {lang_code_id})")
+    
     stats = {
         "category": category,
+        "lang_code_id": lang_code_id,
+        "expected_total": None,
         "visit_seoul_places_collected": 0,
         "places_saved": 0,
         "quests_created": 0,
         "embeddings_created": 0,
         "errors": []
     }
+    stats["expected_total"] = target_total
     
     try:
         logger.info(f"Step 1: Collecting VISIT SEOUL places for {category}...")
         # 카테고리를 VISIT SEOUL category_sn 리스트로 매핑
         from services.visit_seoul_api import map_category_to_visit_seoul_sn
-        visit_seoul_category_sns = map_category_to_visit_seoul_sn(category)
+        visit_seoul_category_sns = map_category_to_visit_seoul_sn(category, lang_code_id=lang_code_id)
         
-        visit_seoul_items = []
+        visit_seoul_items_by_cid: Dict[str, Dict] = {}
         if visit_seoul_category_sns:
             logger.info(f"Mapped category '{category}' to {len(visit_seoul_category_sns)} VISIT SEOUL category_sn(s): {visit_seoul_category_sns}")
             # 각 category_sn에 대해 장소 수집
             for category_sn in visit_seoul_category_sns:
+                if target_total and len(visit_seoul_items_by_cid) >= target_total:
+                    break
+                
+                per_sn_limit = None
+                if target_total:
+                    remaining = max(target_total - len(visit_seoul_items_by_cid), 0)
+                    if remaining == 0:
+                        break
+                    per_sn_limit = remaining
+                
                 items = collect_visit_seoul_places(
                     category_sn=category_sn,
-                    lang_code_id="en",  # 영문으로 수집
-                    max_places=max_places * 2,  # 매칭을 위해 더 많이 수집
+                    lang_code_id=lang_code_id,
+                    max_places=per_sn_limit,
                     delay_between_pages=delay_between_api_calls
                 )
-                visit_seoul_items.extend(items)
-                logger.info(f"Collected {len(items)} places for category_sn: {category_sn}")
+                
+                added = 0
+                for item in items:
+                    cid = normalize_cid(item)
+                    if not cid:
+                        continue
+                    if cid not in visit_seoul_items_by_cid:
+                        visit_seoul_items_by_cid[cid] = item
+                        added += 1
+                
+                logger.info(
+                    "Collected %d new places for category_sn: %s (unique total: %d)",
+                    added,
+                    category_sn,
+                    len(visit_seoul_items_by_cid)
+                )
         else:
             logger.warning(f"Could not map category '{category}' to VISIT SEOUL category_sn, collecting all categories")
-            visit_seoul_items = collect_visit_seoul_places(
+            items = collect_visit_seoul_places(
                 category_sn=None,  # 모든 카테고리 수집
-                lang_code_id="en",  # 영문으로 수집
-                max_places=max_places * 2,  # 매칭을 위해 더 많이 수집
+                lang_code_id=lang_code_id,
+                max_places=target_total,
                 delay_between_pages=delay_between_api_calls
             )
+            for item in items:
+                cid = normalize_cid(item)
+                if not cid:
+                    continue
+                visit_seoul_items_by_cid[cid] = item
+        
+        visit_seoul_items = list(visit_seoul_items_by_cid.values())
         stats["visit_seoul_places_collected"] = len(visit_seoul_items)
-        logger.info(f"Collected {len(visit_seoul_items)} VISIT SEOUL places")
+        logger.info(f"Collected {len(visit_seoul_items)} unique VISIT SEOUL places")
+        
+        if target_total and len(visit_seoul_items) < target_total:
+            logger.warning(
+                "Collected fewer places (%d) than expected target (%d) for category %s",
+                len(visit_seoul_items),
+                target_total,
+                category
+            )
         
         logger.info("Step 2: Fetching VISIT SEOUL place details...")
         visit_seoul_places = []
@@ -170,6 +247,7 @@ def collect_category_places(
                 
                 # 파싱
                 vs_place = parse_visit_seoul_place(item, detail)
+                vs_place["category_label"] = category
                 visit_seoul_places.append(vs_place)
                 
                 if (idx + 1) % 10 == 0:
@@ -218,7 +296,14 @@ def collect_category_places(
         stats["quests_created"] = quest_count
         
         logger.info(f"=== Collection completed for {category} ===")
-        logger.info(f"Summary: {saved_count} places saved, {quest_count} quests created, {stats['embeddings_created']} embeddings created")
+        logger.info(
+            "Summary: %d places saved, %d quests created, %d embeddings created (expected target: %s, collected: %d)",
+            saved_count,
+            quest_count,
+            stats["embeddings_created"],
+            target_total if target_total else "ALL",
+            stats["visit_seoul_places_collected"]
+        )
         
     except Exception as e:
         error_msg = f"Fatal error in collection: {e}"
@@ -242,8 +327,8 @@ def main():
     parser.add_argument(
         "--max-places",
         type=int,
-        default=50,
-        help="Maximum number of places to collect (default: 50)"
+        default=None,
+        help="Maximum number of places to collect (default: category target, <=0 means ALL)"
     )
     parser.add_argument(
         "--area-code",
@@ -256,6 +341,12 @@ def main():
         type=float,
         default=0.5,
         help="Delay between API calls in seconds (default: 0.5)"
+    )
+    parser.add_argument(
+        "--lang-code",
+        type=str,
+        default="en",
+        help="VISIT SEOUL language code (default: en)"
     )
     parser.add_argument(
         "--no-embeddings",
@@ -271,6 +362,7 @@ def main():
     logger.info(f"Category: {args.category}")
     logger.info(f"Max places: {args.max_places}")
     logger.info(f"Area code: {args.area_code}")
+    logger.info(f"Language code: {args.lang_code}")
     logger.info(f"API call delay: {args.delay}s")
     logger.info("=" * 60)
     
@@ -283,12 +375,16 @@ def main():
         max_places=args.max_places,
         area_code=args.area_code,
         delay_between_api_calls=args.delay,
-        create_embeddings=not args.no_embeddings
+        create_embeddings=not args.no_embeddings,
+        lang_code_id=args.lang_code
     )
     
     logger.info("=" * 60)
     logger.info("Collection Statistics:")
     logger.info(f"  Category: {stats['category']}")
+    logger.info(f"  Lang code: {stats['lang_code_id']}")
+    if stats.get("expected_total"):
+        logger.info(f"  Target count: {stats['expected_total']}")
     logger.info(f"  VISIT SEOUL places collected: {stats['visit_seoul_places_collected']}")
     logger.info(f"  Places saved: {stats['places_saved']}")
     logger.info(f"  Quests created: {stats['quests_created']}")

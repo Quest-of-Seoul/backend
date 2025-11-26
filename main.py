@@ -9,7 +9,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import docent, quest, reward, vlm, recommend, map
+from routers import docent, quest, reward, vlm, recommend, map, ai_station, auth
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,6 +35,10 @@ app = FastAPI(
     lifespan=lifespan,
     openapi_tags=[
         {
+            "name": "Authentication",
+            "description": "User authentication: signup, login, token management"
+        },
+        {
             "name": "Docent",
             "description": "AI-powered conversational tour guide with TTS support"
         },
@@ -57,6 +61,10 @@ app = FastAPI(
         {
             "name": "Map - Search & Filter",
             "description": "Map-based quest and place search with filtering"
+        },
+        {
+            "name": "AI Station",
+            "description": "AI Station chat list, RAG chat, VLM chat, route recommendation, and STT+TTS"
         }
     ]
 )
@@ -69,12 +77,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(docent.router, prefix="/docent", tags=["Docent"])
 app.include_router(quest.router, prefix="/quest", tags=["Quest"])
 app.include_router(reward.router, prefix="/reward", tags=["Reward"])
 app.include_router(vlm.router, prefix="/vlm", tags=["VLM - Image Analysis"])
 app.include_router(recommend.router, prefix="/recommend", tags=["Recommend - Place Recommendation"])
 app.include_router(map.router, prefix="/map", tags=["Map - Search & Filter"])
+app.include_router(ai_station.router, prefix="/ai-station", tags=["AI Station"])
 
 @app.get("/")
 async def root():

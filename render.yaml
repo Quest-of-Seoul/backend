@@ -12,6 +12,11 @@ services:
       # Server
       - key: PORT
         value: 8000
+      # Authentication
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 1440
       # Database
       - key: SUPABASE_URL
         sync: false

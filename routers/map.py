@@ -1,9 +1,10 @@
 """Map Search & Filter Router"""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 from services.db import get_db
+from services.auth_deps import get_current_user_id
 import math
 import logging
 
@@ -12,16 +13,17 @@ router = APIRouter()
 
 
 # 카테고리 매핑 (프론트엔드 → DB)
+# DB에 저장되는 카테고리는 영문 카테고리명 그대로 사용 (Attractions, History, Culture 등)
 CATEGORY_MAPPING = {
-    "Attractions": ["Attraction"],
-    "History": ["Historic Site"],
-    "Culture": ["Cultural Village", "문화"],
-    "Nature": ["Nature", "자연"],
-    "Food": ["Food", "음식"],
-    "Drinks": ["Drinks", "음료"],
-    "Shopping": ["Shopping", "쇼핑"],
-    "Activities": ["Activities", "활동"],
-    "Events": ["Events", "이벤트"],
+    "Attractions": ["Attractions"],
+    "History": ["History"],
+    "Culture": ["Culture"],
+    "Nature": ["Nature"],
+    "Food": ["Food"],
+    "Drinks": ["Drinks"],
+    "Shopping": ["Shopping"],
+    "Activities": ["Activities"],
+    "Events": ["Events"],
 }
 
 
@@ -71,7 +73,6 @@ class MapFilterRequest(BaseModel):
 
 
 class WalkDistanceRequest(BaseModel):
-    user_id: str
     quest_ids: List[int]
     user_latitude: float
     user_longitude: float
@@ -467,12 +468,12 @@ def calculate_quest_route_distance(
         }
 
 
-@router.get("/stats/{user_id}")
+@router.get("/stats")
 async def get_map_stats(
-    user_id: str,
     quest_ids: Optional[List[int]] = Query(None, description="선택한 퀘스트 ID 목록 (walk 거리 계산용)"),
     user_latitude: Optional[float] = Query(None, description="사용자 현재 위도 (walk 거리 계산용)"),
-    user_longitude: Optional[float] = Query(None, description="사용자 현재 경도 (walk 거리 계산용)")
+    user_longitude: Optional[float] = Query(None, description="사용자 현재 경도 (walk 거리 계산용)"),
+    user_id: str = Depends(get_current_user_id)
 ):
     """
     맵 헤더에 표시할 사용자 통계 조회
@@ -538,7 +539,7 @@ async def get_map_stats(
 
 
 @router.post("/stats/walk-distance")
-async def calculate_walk_distance(request: WalkDistanceRequest):
+async def calculate_walk_distance(request: WalkDistanceRequest, user_id: str = Depends(get_current_user_id)):
     """
     선택한 퀘스트 루트의 총 거리 계산 (walk 거리만)
     """
@@ -570,4 +571,3 @@ async def calculate_walk_distance(request: WalkDistanceRequest):
     except Exception as e:
         logger.error(f"Error calculating walk distance: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error calculating walk distance: {str(e)}")
-

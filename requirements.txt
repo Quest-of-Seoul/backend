@@ -13,6 +13,7 @@ pinecone>=5.0.0
 # AI Services
 google-generativeai==0.8.3
 google-cloud-texttospeech==2.18.0
+google-cloud-speech==2.21.0
 openai>=1.0.0
 
 # Image Processing & ML
@@ -23,3 +24,10 @@ numpy>=1.24.0
 
 # Testing
 requests>=2.31.0
+
+# Authentication
+python-jose[cryptography]==3.3.0
+passlib==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.12
+email-validator>=2.0.0

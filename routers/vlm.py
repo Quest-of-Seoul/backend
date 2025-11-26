@@ -1,6 +1,6 @@
 """VLM Router"""
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 import base64
@@ -25,13 +25,13 @@ from services.pinecone_store import search_similar_pinecone, upsert_pinecone
 from services.ai import generate_docent_message
 from services.tts import text_to_speech_url, text_to_speech
 from services.storage import upload_audio_to_storage, compress_and_upload_image
+from services.auth_deps import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 class VLMAnalyzeRequest(BaseModel):
-    user_id: str
     image: str
     latitude: Optional[float] = None
     longitude: Optional[float] = None
@@ -48,12 +48,12 @@ class SimilarImageRequest(BaseModel):
 
 
 @router.post("/analyze")
-async def analyze_image(request: VLMAnalyzeRequest):
+async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_current_user_id)):
     """AR camera image analysis with VLM and vector search"""
     start_time = time.time()
     
     try:
-        logger.info(f"VLM analysis: user={request.user_id}, GPS=({request.latitude}, {request.longitude})")
+        logger.info(f"VLM analysis: user={user_id}, GPS=({request.latitude}, {request.longitude})")
         
         try:
             image_bytes = base64.b64decode(request.image)
@@ -211,7 +211,7 @@ VLM 분석 결과:
             )
             
             save_vlm_log(
-                user_id=request.user_id,
+                user_id=user_id,
                 image_url=uploaded_image_url,
                 latitude=request.latitude,
                 longitude=request.longitude,
@@ -256,13 +256,13 @@ VLM 분석 결과:
 
 @router.post("/analyze-multipart")
 async def analyze_image_multipart(
-    user_id: str = Form(...),
     image: UploadFile = File(...),
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
     language: str = Form("ko"),
     prefer_url: bool = Form(False),
-    enable_tts: bool = Form(True)
+    enable_tts: bool = Form(True),
+    user_id: str = Depends(get_current_user_id)
 ):
     """AR camera image analysis (multipart/form-data)"""
     try:
@@ -270,7 +270,6 @@ async def analyze_image_multipart(
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
         
         request = VLMAnalyzeRequest(
-            user_id=user_id,
             image=image_base64,
             latitude=latitude,
             longitude=longitude,
@@ -279,7 +278,7 @@ async def analyze_image_multipart(
             enable_tts=enable_tts
         )
         
-        return await analyze_image(request)
+        return await analyze_image(request, user_id=user_id)
     
     except Exception as e:
         logger.error(f"Multipart upload error: {e}", exc_info=True)
