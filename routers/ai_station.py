@@ -1057,16 +1057,16 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         
         # 상위 점수 퀘스트 선택
         for quest in scored_quests[:remaining_count * 2]:  # 여유있게 선택
-            if len(recommended_quests) >= remaining_count:
+            if len(recommended_quests) >= 4:  # 🔥 총 4개가 되도록 수정
                 break
-            
+
             # 중복 제거 (같은 장소는 하나만)
             place_id = quest.get("place_id")
             if any(rq.get("place_id") == place_id for rq in recommended_quests):
                 continue
-            
+
             recommended_quests.append(quest)
-        
+
         # 4개로 맞추기
         recommended_quests = recommended_quests[:4]
         
