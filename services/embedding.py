@@ -151,7 +151,14 @@ def generate_text_embedding(text: str) -> Optional[List[float]]:
         return None
     
     try:
-        inputs = processor(text=[text], return_tensors="pt", padding=True)
+        # CLIP 모델의 max_position_embeddings는 77이므로 truncation 필요
+        inputs = processor(
+            text=[text], 
+            return_tensors="pt", 
+            padding=True,
+            truncation=True,
+            max_length=77
+        )
         inputs = {k: v.to(device) for k, v in inputs.items()}
         
         with torch.no_grad():
