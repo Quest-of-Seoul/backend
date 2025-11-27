@@ -569,13 +569,31 @@ UPDATE places
 SET district = extract_district_from_address(address)
 WHERE district IS NULL AND address IS NOT NULL;
 
--- Update quests with place_id based on location matching (within 0.01 degrees ~ 1km)
+-- Update quests with place_id based on name matching first, then location matching
+-- Step 1: Try name-based matching (exact or similar)
 UPDATE quests q
 SET place_id = (
     SELECT p.id
     FROM places p
-    WHERE ABS(p.latitude - q.latitude) < 0.01
-      AND ABS(p.longitude - q.longitude) < 0.01
+    WHERE LOWER(TRIM(p.name)) = LOWER(TRIM(q.name))
+       OR LOWER(TRIM(p.name)) LIKE LOWER(TRIM(q.name)) || '%'
+       OR LOWER(TRIM(q.name)) LIKE LOWER(TRIM(p.name)) || '%'
+    ORDER BY 
+        CASE 
+            WHEN LOWER(TRIM(p.name)) = LOWER(TRIM(q.name)) THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+)
+WHERE q.place_id IS NULL;
+
+-- Step 2: For remaining quests, try location-based matching (within 0.05 degrees ~ 5km)
+UPDATE quests q
+SET place_id = (
+    SELECT p.id
+    FROM places p
+    WHERE ABS(p.latitude - q.latitude) < 0.05
+      AND ABS(p.longitude - q.longitude) < 0.05
     ORDER BY 
         ABS(p.latitude - q.latitude) + ABS(p.longitude - q.longitude)
     LIMIT 1

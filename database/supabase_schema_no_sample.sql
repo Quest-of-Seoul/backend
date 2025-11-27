@@ -574,4 +574,3 @@ COMMENT ON COLUMN places.district IS '자치구 (주소에서 정규식으로 �
 -- Update table statistics for query optimization
 ANALYZE places;
 ANALYZE quests;
-
