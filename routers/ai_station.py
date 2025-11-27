@@ -786,7 +786,10 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 place = place_result.data[0]
                 quests = place.get("quests", [])
                 if quests and len(quests) > 0:
-                    must_visit_quest = quests[0]
+                    must_visit_quest = dict(quests[0])
+                    # 🔥 place 정보 추가 (district, place_image_url 등)
+                    must_visit_quest["district"] = place.get("district")
+                    must_visit_quest["place_image_url"] = place.get("image_url")
         
         # 사용자 취향 기반 추천 알고리즘 구현
         import math
@@ -988,15 +991,15 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         scored_quests = []
         for quest in candidate_quests:
             quest_id = quest.get("id")
-            
+
             # 이미 완료한 퀘스트는 제외
             if quest_id in completed_quest_ids:
                 continue
-            
+
             # 필수 방문 장소는 제외 (나중에 별도로 추가)
             if must_visit_quest and quest_id == must_visit_quest.get("id"):
                 continue
-            
+
             quest_category = quest.get("category", "")
             quest_lat = quest.get("latitude")
             quest_lon = quest.get("longitude")
@@ -1080,6 +1083,9 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         
         # 채팅 기록 저장 (여행 일정 - 보기 전용)
         try:
+            # 🔥 quest IDs를 추출하여 저장
+            quest_ids = [q.get("id") for q in recommended_quests]
+
             db.table("chat_logs").insert({
                 "user_id": user_id,
                 "user_message": f"경로 추천 요청: {request.preferences}",
@@ -1089,16 +1095,16 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 "chat_session_id": session_id,
                 "title": theme,  # ex: Events, Food, Culture 등
                 "is_read_only": True,  # 보기 전용
-                
+
                 # 🔥 신규 필드 저장
                 "quest_step": 99,  # 최종 결과 단계
                 "prompt_step_text": "AI가 추천한 여행 코스 결과입니다!",
-                "options": None,
+                "options": {"quest_ids": quest_ids},  # 🔥 quest IDs 저장
                 "selected_theme": theme,
                 "selected_districts": request.preferences.get("districts"),
                 "include_cart": request.preferences.get("include_cart", False)
             }).execute()
-            logger.info(f"✅ Route recommend chat log saved (session: {session_id})")
+            logger.info(f"✅ Route recommend chat log saved (session: {session_id}, quest_ids: {quest_ids})")
         except Exception as db_error:
             logger.warning(f"Failed to save chat log: {db_error}")
         
