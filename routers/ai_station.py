@@ -166,18 +166,36 @@ async def get_chat_list(
         query = db.table("chat_logs").select("*").eq("user_id", user_id)
         if mode:
             query = query.eq("mode", mode)
+            logger.info(f"Filtering by mode: {mode}")
         if function_type:
             query = query.eq("function_type", function_type)
+            logger.info(f"Filtering by function_type: {function_type}")
         else:
             query = query.in_("function_type", ["rag_chat", "route_recommend", "vlm_chat"])
+            logger.info("Filtering by function_type: all types (rag_chat, route_recommend, vlm_chat)")
 
         result = query.order("created_at", desc=True).limit(limit * 10).execute()
+        logger.info(f"Found {len(result.data)} chat logs for user {user_id}")
         
         # 세션별로 그룹화
         sessions = {}
+        vlm_count = 0
+        rag_count = 0
+        route_count = 0
+        
         for chat in result.data:
+            # 디버깅: function_type 카운트
+            ft = chat.get("function_type")
+            if ft == "vlm_chat":
+                vlm_count += 1
+            elif ft == "rag_chat":
+                rag_count += 1
+            elif ft == "route_recommend":
+                route_count += 1
+            
             session_id = chat.get("chat_session_id")
             if not session_id:
+                logger.debug(f"Skipping chat without session_id: {chat.get('id')}")
                 continue  # 세션 ID가 없으면 스킵
             
             if session_id not in sessions:
@@ -198,12 +216,27 @@ async def get_chat_list(
                     "chats": []
                 }
             
-            sessions[session_id]["chats"].append({
+            chat_item = {
                 "id": chat.get("id"),
                 "user_message": chat.get("user_message"),
                 "ai_response": chat.get("ai_response"),
+                "image_url": chat.get("image_url"),
                 "created_at": chat.get("created_at")
-            })
+            }
+            
+            # 🔥 Route recommend 전용 필드 추가 (모든 필드를 각 chat에 복사)
+            if ft == "route_recommend":
+                chat_item.update({
+                    "title": chat.get("title"),
+                    "selected_theme": chat.get("selected_theme"),
+                    "selected_districts": chat.get("selected_districts"),
+                    "include_cart": chat.get("include_cart"),
+                    "quest_step": chat.get("quest_step"),
+                    "prompt_step_text": chat.get("prompt_step_text"),
+                })
+                logger.debug(f"Route recommend chat item: title={chat.get('title')}, theme={chat.get('selected_theme')}, districts={chat.get('selected_districts')}")
+            
+            sessions[session_id]["chats"].append(chat_item)
             
             # 최신 업데이트 시간 갱신
             if chat.get("created_at") > sessions[session_id]["updated_at"]:
@@ -215,6 +248,7 @@ async def get_chat_list(
         session_list.sort(key=lambda x: x["updated_at"], reverse=True)
         session_list = session_list[:limit]  # 최종 limit 적용
         
+        logger.info(f"Chat breakdown - VLM: {vlm_count}, RAG: {rag_count}, Route: {route_count}")
         logger.info(f"Retrieved {len(session_list)} chat sessions for user: {user_id}")
         
         return {
@@ -256,12 +290,27 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
         # 채팅 목록
         chats = []
         for chat in result.data:
-            chats.append({
+            chat_data = {
                 "id": chat.get("id"),
                 "user_message": chat.get("user_message"),
                 "ai_response": chat.get("ai_response"),
+                "image_url": chat.get("image_url"),
                 "created_at": chat.get("created_at")
-            })
+            }
+            
+            # Plan Chat 전용 필드 추가
+            if chat.get("function_type") == "route_recommend":
+                chat_data.update({
+                    "title": chat.get("title"),
+                    "selected_theme": chat.get("selected_theme"),
+                    "selected_districts": chat.get("selected_districts"),
+                    "include_cart": chat.get("include_cart"),
+                    "quest_step": chat.get("quest_step"),
+                    "prompt_step_text": chat.get("prompt_step_text"),
+                    "options": chat.get("options")
+                })
+            
+            chats.append(chat_data)
         
         logger.info(f"Retrieved {len(chats)} chats for session: {session_id}")
         
@@ -508,8 +557,8 @@ async def quest_vlm_chat(request: QuestVLMChatRequest, user_id: str = Depends(ge
         
         # VLM 분석 (VLM 서비스 직접 사용)
         from services.vlm import analyze_place_image, extract_place_info_from_vlm_response, calculate_confidence_score
-        from services.db import search_places_by_radius, get_place_by_name
-        from services.embedding import generate_image_embedding
+        from services.db import search_places_by_radius, get_place_by_name, save_vlm_log
+        from services.embedding import generate_image_embedding, hash_image
         from services.optimized_search import search_with_gps_filter
         
         # 주변 장소 검색 (GPS 정보가 없으면 빈 리스트)
@@ -585,12 +634,41 @@ VLM 분석 결과:
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # 히스토리에 저장 (조회 전용)
+        # VLM 분석 로그 저장 (vlm_logs - 분석용)
         try:
+            logger.info("💾 Saving VLM log to vlm_logs...")
+            image_hash = hash_image(image_bytes)
+            save_vlm_log(
+                user_id=user_id,
+                image_url=image_url,
+                latitude=None,
+                longitude=None,
+                vlm_provider="gpt4v",
+                vlm_response=vlm_response,
+                final_description=final_description,
+                matched_place_id=matched_place.get("id") if matched_place else None,
+                image_hash=image_hash
+            )
+            logger.info("✅ VLM log saved to vlm_logs")
+        except Exception as vlm_log_error:
+            logger.error(f"❌ Failed to save VLM log: {vlm_log_error}", exc_info=True)
+        
+        # 히스토리에 저장 (chat_logs - 채팅 히스토리용)
+        try:
+            logger.info(f"💾 Saving VLM chat to chat_logs (session: {session_id})...")
+            
+            # 🔥 Image URL 검증
+            if not image_url:
+                logger.error("❌ Image URL is empty - upload may have failed!")
+                raise HTTPException(status_code=500, detail="Image upload failed: url is empty")
+            
+            logger.info(f"📸 Image URL: {image_url}")
+            
             existing_session = db.table("chat_logs").select("id").eq("chat_session_id", session_id).limit(1).execute()
             is_first_message = not existing_session.data
             title_value = quest.get("name") or quest.get("title")
-            db.table("chat_logs").insert({
+            
+            chat_data = {
                 "user_id": user_id,
                 "user_message": request.user_message or "이미지 기반 질문",
                 "ai_response": ai_response,
@@ -599,11 +677,16 @@ VLM 분석 결과:
                 "chat_session_id": session_id,
                 "title": title_value if is_first_message else None,
                 "landmark": title_value,
-                "image_url": image_url,
+                "image_url": image_url,  # 🔥 반드시 포함
                 "is_read_only": True
-            }).execute()
+            }
+            logger.info(f"📝 Chat data to save: mode={chat_data['mode']}, function_type={chat_data['function_type']}, session={session_id}, has_image={bool(image_url)}")
+            
+            result = db.table("chat_logs").insert(chat_data).execute()
+            logger.info(f"✅ VLM chat saved to chat_logs (id: {result.data[0]['id'] if result.data else 'unknown'})")
         except Exception as db_error:
-            logger.warning(f"Failed to save quest VLM chat log: {db_error}")
+            logger.error(f"❌ Failed to save quest VLM chat log: {db_error}", exc_info=True)
+            raise
         
         response = {
             "success": True,
@@ -758,9 +841,18 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 "mode": "explore",
                 "function_type": "route_recommend",
                 "chat_session_id": session_id,
-                "title": theme,  # 테마를 제목으로 사용
-                "is_read_only": True  # 보기 전용
+                "title": theme,  # ex: Events, Food, Culture 등
+                "is_read_only": True,  # 보기 전용
+                
+                # 🔥 신규 필드 저장
+                "quest_step": 99,  # 최종 결과 단계
+                "prompt_step_text": "AI가 추천한 여행 코스 결과입니다!",
+                "options": None,
+                "selected_theme": theme,
+                "selected_districts": request.preferences.get("districts"),
+                "include_cart": request.preferences.get("include_cart", False)
             }).execute()
+            logger.info(f"✅ Route recommend chat log saved (session: {session_id})")
         except Exception as db_error:
             logger.warning(f"Failed to save chat log: {db_error}")
         

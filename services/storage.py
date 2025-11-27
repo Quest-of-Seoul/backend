@@ -102,10 +102,15 @@ def compress_and_upload_image(
             }
         )
         
-        public_url = supabase.storage.from_(bucket).get_public_url(filename)
+        # 🔥 절대경로로 강제 URL 생성 (Supabase get_public_url 대신)
+        SUPABASE_URL = os.getenv("SUPABASE_URL")
+        if not SUPABASE_URL:
+            logger.error("SUPABASE_URL not set in environment")
+            return None
         
-        if public_url and public_url.endswith('?'):
-            public_url = public_url[:-1]
+        # 끝에 슬래시 제거
+        SUPABASE_URL = SUPABASE_URL.rstrip('/')
+        public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{filename}"
         
         logger.info(f"Image uploaded: {public_url}")
         return public_url
