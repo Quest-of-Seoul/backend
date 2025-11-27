@@ -291,12 +291,11 @@ def save_place(place_data: Dict) -> Optional[str]:
             logger.error("Place coordinates are required")
             return None
         
-        # 중복 체크 (이름과 좌표로)
+        # 중복 체크 (이름으로만 - UNIQUE 제약이 name에 있음)
+        # 이름이 같으면 같은 장소로 간주하고 업데이트
         existing = db.table("places") \
             .select("id") \
             .ilike("name", place_data["name"]) \
-            .eq("latitude", place_data["latitude"]) \
-            .eq("longitude", place_data["longitude"]) \
             .limit(1) \
             .execute()
         
@@ -351,12 +350,24 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
             place.get("district"),
             quest_points
         )
+        
+        # 문자열 길이 제한 검증 (스키마 제약 조건)
+        quest_name = place.get("name") or ""
+        if len(quest_name) > 255:
+            logger.warning(f"Quest name exceeds 255 characters, truncating: {quest_name[:50]}...")
+            quest_name = quest_name[:255]
+        
+        quest_category = place.get("category") or ""
+        if quest_category and len(quest_category) > 50:
+            logger.warning(f"Quest category exceeds 50 characters, truncating: {quest_category[:50]}...")
+            quest_category = quest_category[:50]
+        
         quest_insert = {
             "place_id": place_id,
-            "name": place.get("name"),
-            "title": place.get("name"),
+            "name": quest_name,
+            "title": quest_name,  # title도 255자 제한
             "description": place.get("description"),
-            "category": place.get("category"),
+            "category": quest_category,
             "latitude": float(place.get("latitude")),
             "longitude": float(place.get("longitude")),
             "reward_point": quest_points,
@@ -394,4 +405,3 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
     except Exception as e:
         logger.error(f"Error creating quest: {e}", exc_info=True)
         return None
-
