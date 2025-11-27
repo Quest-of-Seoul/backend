@@ -83,9 +83,9 @@ def generate_route_recommendation(
         return []
     
     try:
-        # 후보 퀘스트 정보 정리
+        # Organize candidate quest information
         quest_info_list = []
-        for quest in candidate_quests[:20]:  # 상위 20개만 AI에 전달
+        for quest in candidate_quests[:20]:  # Only top 20 passed to AI
             quest_info = {
                 "id": quest.get("id"),
                 "name": quest.get("name", ""),
@@ -99,7 +99,7 @@ def generate_route_recommendation(
             }
             quest_info_list.append(quest_info)
         
-        # 선호도 정보 정리
+        # Organize preference information
         theme = preferences.get("theme") or preferences.get("category") or "Seoul Travel"
         if isinstance(theme, dict):
             theme = theme.get("name", "Seoul Travel")
@@ -137,7 +137,7 @@ Return in JSON format:
         response = model.generate_content(prompt)
         text = response.text.strip()
         
-        # JSON 추출
+        # Extract JSON
         if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -146,7 +146,7 @@ Return in JSON format:
         result = json.loads(text.strip())
         selected_ids = result.get("selected_quest_ids", [])
         
-        # 선택된 퀘스트 반환
+        # Return selected quests
         selected_quests = []
         quest_dict = {q.get("id"): q for q in candidate_quests}
         

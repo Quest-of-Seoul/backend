@@ -38,7 +38,7 @@ async def chat_with_docent(request: DocentRequest, user_id: str = Depends(get_cu
         ai_response = generate_docent_message(
             landmark=request.landmark,
             user_message=request.user_message,
-            language=request.language
+            language="en"
         )
 
         audio_url = None
@@ -96,7 +96,7 @@ async def get_quiz(landmark: str, language: str = "en"):
     """Generate quiz question about landmark"""
     try:
         logger.info(f"Quiz generation: {landmark}")
-        quiz = generate_quiz(landmark, language)
+        quiz = generate_quiz(landmark, "en")
         return quiz
     except Exception as e:
         logger.error(f"Quiz error: {e}", exc_info=True)

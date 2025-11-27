@@ -86,7 +86,7 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
             )
             logger.info(f"Found {len(nearby_places)} nearby places")
         
-        # 멀티 모달 검색: 이미지 임베딩 + GPS + 텍스트 매칭
+        # Multi-modal search: image embedding + GPS + text matching
         embedding = generate_image_embedding(image_bytes)
         if not embedding:
             logger.warning("Embedding generation failed")
@@ -98,14 +98,14 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
         if embedding:
             from services.optimized_search import search_with_gps_filter
             
-            # 이미지 벡터 검색
+            # Image vector search
             similar_images = search_with_gps_filter(
                 embedding=embedding,
                 latitude=request.latitude,
                 longitude=request.longitude,
                 radius_km=5.0,
                 match_threshold=0.6,
-                match_count=5,  # 더 많은 후보 수집
+                match_count=5,  # Collect more candidates
                 quest_only=False
             )
             
@@ -114,23 +114,23 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
                 matched_place_from_vector = similar_images[0].get("place")
                 logger.info(f"Found {len(similar_images)} similar images (best: {best_similarity:.2f})")
         
-        # VLM 분석 (멀티 모달 정보 포함)
-        # 벡터 검색 결과를 nearby_places에 우선 포함
+        # VLM analysis (with multi-modal information)
+        # Prioritize vector search results in nearby_places
         enhanced_nearby_places = []
         
-        # 벡터 검색으로 찾은 장소를 우선순위로 추가
+        # Add places found by vector search with priority
         if matched_place_from_vector:
             enhanced_nearby_places.append({
                 "id": matched_place_from_vector.get("id"),
                 "name": matched_place_from_vector.get("name"),
                 "category": matched_place_from_vector.get("category"),
-                "distance_km": 0.0,  # 벡터 매칭은 거리 정보 없음
+                "distance_km": 0.0,  # Vector matching has no distance info
                 "source": "vector_search"
             })
         
-        # GPS 기반 주변 장소 추가
+        # Add GPS-based nearby places
         for np in nearby_places:
-            # 중복 제거
+            # Remove duplicates
             if not any(ep.get("id") == np.get("id") for ep in enhanced_nearby_places):
                 enhanced_nearby_places.append(np)
         
@@ -138,7 +138,7 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
             image_bytes=image_bytes,
             nearby_places=enhanced_nearby_places,
             language="en",
-            quest_context=None  # 일반 VLM 분석에는 퀘스트 컨텍스트 없음
+            quest_context=None  # No quest context for general VLM analysis
         )
         
         if not vlm_response:
@@ -152,28 +152,28 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
         matched_place = None
         matched_place_id = None
         
-        # 멀티 모달 매칭: VLM + 벡터 검색 + GPS 통합
-        # 1순위: 벡터 검색 결과 (이미지 유사도가 높음)
+        # Multi-modal matching: VLM + vector search + GPS integration
+        # Priority 1: Vector search results (high image similarity)
         if matched_place_from_vector:
             matched_place = matched_place_from_vector
             matched_place_id = matched_place.get("id")
             logger.info(f"Matched place from vector search: {matched_place.get('name')}")
         
-        # 2순위: VLM이 추출한 장소명으로 검색
+        # Priority 2: Search by place name extracted by VLM
         elif place_info.get("place_name"):
             matched_place = get_place_by_name(place_info["place_name"], fuzzy=True)
             if matched_place:
                 matched_place_id = matched_place.get("id")
                 logger.info(f"Matched place from VLM: {matched_place.get('name')}")
         
-        # 3순위: 벡터 검색 결과 (VLM 매칭 실패 시)
+        # Priority 3: Vector search results (if VLM matching failed)
         if not matched_place and similar_images:
             matched_place = similar_images[0].get("place")
             if matched_place:
                 matched_place_id = matched_place.get("id")
                 logger.info(f"Matched place from vector fallback: {matched_place.get('name')}")
         
-        # 4순위: GPS 기반 주변 장소 중 첫 번째 (매칭 실패 시)
+        # Priority 4: First GPS-based nearby place (if matching failed)
         if not matched_place and nearby_places:
             matched_place = nearby_places[0]
             matched_place_id = matched_place.get("id")
