@@ -21,7 +21,7 @@ def get_tts_client():
 
 def text_to_speech_bytes(
     text: str,
-    language_code: str = "ko-KR",
+    language_code: str = "en-US",
     voice_name: Optional[str] = None,
     speaking_rate: float = 1.0,
     pitch: float = 0.0
@@ -38,7 +38,7 @@ def text_to_speech_bytes(
             voice_name = {
                 "ko-KR": "ko-KR-Wavenet-A",
                 "en-US": "en-US-Wavenet-F",
-            }.get(language_code, "ko-KR-Wavenet-A")
+            }.get(language_code, "en-US-Wavenet-F")
         
         voice = texttospeech.VoiceSelectionParams(
             language_code=language_code,
@@ -69,7 +69,7 @@ def text_to_speech_bytes(
 
 def text_to_speech(
     text: str,
-    language_code: str = "ko-KR",
+    language_code: str = "en-US",
     voice_name: Optional[str] = None
 ) -> Optional[str]:
     """Convert text to speech (returns base64)"""
@@ -82,7 +82,7 @@ def text_to_speech(
 
 def text_to_speech_url(
     text: str,
-    language_code: str = "ko-KR",
+    language_code: str = "en-US",
     voice_name: Optional[str] = None,
     upload_to_storage: bool = True
 ) -> Tuple[Optional[str], Optional[str]]:

@@ -94,21 +94,20 @@ def analyze_image_gpt4v(
 def analyze_place_image(
     image_bytes: bytes,
     nearby_places: Optional[List[Dict]] = None,
-    language: str = "ko"
+    language: str = "en",
+    quest_context: Optional[Dict] = None
 ) -> Optional[str]:
     """Analyze place image"""
-    prompt = build_place_analysis_prompt(nearby_places, language)
+    prompt = build_place_analysis_prompt(nearby_places, language, quest_context)
     
     if not OPENAI_AVAILABLE:
-        error_msg = "GPT-4V를 사용할 수 없습니다." if language == "ko" else "GPT-4V unavailable."
-        logger.error(error_msg)
+        logger.error("GPT-4V unavailable.")
         return None
     
     result = analyze_image_gpt4v(image_bytes, prompt)
     
     if not result:
-        error_msg = "이미지 분석에 실패했습니다." if language == "ko" else "Image analysis failed."
-        logger.error(error_msg)
+        logger.error("Image analysis failed.")
         return None
     
     return result
@@ -116,35 +115,12 @@ def analyze_place_image(
 
 def build_place_analysis_prompt(
     nearby_places: Optional[List[Dict]] = None,
-    language: str = "ko"
+    language: str = "en",
+    quest_context: Optional[Dict] = None
 ) -> str:
     """Build place analysis prompt"""
     
-    if language == "ko":
-        prompt = """당신은 서울 관광 전문가입니다. 이미지를 분석하여 다음을 제공하세요:
-
-1. 이 장소가 무엇인지 정확히 식별
-2. 건축 양식, 색상, 특징적인 요소 설명
-3. 역사적/문화적 배경 (알려진 경우)
-4. 이 장소의 대표적인 특징
-
-응답 형식:
-장소명: [구체적인 이름]
-카테고리: [관광지/음식점/카페/공원/역사유적 등]
-설명: [2-3문장으로 장소 설명]
-특징: [시각적 특징과 특별한 점]
-신뢰도: [high/medium/low]"""
-        
-        if nearby_places:
-            places_text = "\n".join([
-                f"- {p.get('name', 'Unknown')} ({p.get('category', 'N/A')}) - {p.get('distance_km', 0):.2f}km"
-                for p in nearby_places[:5]
-            ])
-            prompt += f"\n\n참고: GPS 기반 주변 장소 (1km 이내):\n{places_text}\n"
-            prompt += "\n위 후보 중 이미지와 일치하는 장소가 있다면 우선 고려하세요."
-    
-    else:
-        prompt = """You are a Seoul tourism expert. Analyze this image and provide:
+    prompt = """You are a Seoul tourism expert. Analyze this image and provide:
 
 1. Identify the exact place/location
 2. Describe architectural style, colors, distinctive features
@@ -157,14 +133,39 @@ Category: [tourist spot/restaurant/cafe/park/historic site, etc.]
 Description: [2-3 sentences describing the place]
 Features: [visual characteristics and special points]
 Confidence: [high/medium/low]"""
+    
+    # 퀘스트 컨텍스트 추가
+    if quest_context:
+        quest_name = quest_context.get("name") or quest_context.get("title", "")
+        quest_description = quest_context.get("description", "")
+        quest_category = quest_context.get("category", "")
+        place_info = quest_context.get("place", {})
         
-        if nearby_places:
-            places_text = "\n".join([
-                f"- {p.get('name', 'Unknown')} ({p.get('category', 'N/A')}) - {p.get('distance_km', 0):.2f}km"
-                for p in nearby_places[:5]
-            ])
-            prompt += f"\n\nReference: Nearby places within 1km (GPS-based):\n{places_text}\n"
-            prompt += "\nIf the image matches any of these candidates, prioritize them."
+        quest_info = []
+        if quest_name:
+            quest_info.append(f"Quest Place: {quest_name}")
+        if quest_category:
+            quest_info.append(f"Category: {quest_category}")
+        if quest_description:
+            quest_info.append(f"Description: {quest_description[:200]}...")
+        if place_info:
+            if place_info.get("address"):
+                quest_info.append(f"Address: {place_info['address']}")
+            if place_info.get("district"):
+                quest_info.append(f"District: {place_info['district']}")
+        
+        if quest_info:
+            prompt += "\n\n[Quest Information]\n"
+            prompt += "\n".join(quest_info)
+            prompt += "\n\nPlease verify if the image matches this quest place."
+    
+    if nearby_places:
+        places_text = "\n".join([
+            f"- {p.get('name', 'Unknown')} ({p.get('category', 'N/A')}) - {p.get('distance_km', 0):.2f}km"
+            for p in nearby_places[:5]
+        ])
+        prompt += f"\n\nReference: Nearby places within 1km (GPS-based):\n{places_text}\n"
+        prompt += "\nIf the image matches any of these candidates, prioritize them."
     
     return prompt
 

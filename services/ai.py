@@ -4,7 +4,7 @@ import google.generativeai as genai
 import os
 import logging
 import json
-from typing import Optional
+from typing import Optional, List, Dict, Set
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +21,11 @@ else:
 def generate_docent_message(
     landmark: str,
     user_message: Optional[str] = None,
-    language: str = "ko"
+    language: str = "en"
 ) -> str:
     """Generate AI docent response"""
     
-    if language == "ko":
-        base_prompt = f"""당신은 '{landmark}'에 대한 친절한 AI 도슨트입니다.
-
-{f'질문: {user_message}' if user_message else '이 장소를 소개해주세요.'}
-
-친근하고 흥미롭게 3-4문장으로 답변해주세요."""
-    else:
-        base_prompt = f"""You are a friendly AI docent for '{landmark}'.
+    base_prompt = f"""You are a friendly AI docent for '{landmark}'.
 
 {f'Question: {user_message}' if user_message else 'Please introduce this place.'}
 
@@ -43,24 +36,13 @@ Provide an engaging response in 3-4 sentences."""
         return response.text
     except Exception as e:
         logger.error(f"Gemini error: {e}", exc_info=True)
-        return "응답을 생성할 수 없습니다." if language == "ko" else "Cannot generate response."
+        return "Cannot generate response."
 
 
-def generate_quiz(landmark: str, language: str = "ko") -> dict:
+def generate_quiz(landmark: str, language: str = "en") -> dict:
     """Generate quiz about landmark"""
     
-    if language == "ko":
-        prompt = f"""{landmark}에 대한 퀴즈를 만들어주세요.
-
-다음 JSON 형식으로 반환:
-{{
-    "question": "퀴즈 질문",
-    "options": ["선택지1", "선택지2", "선택지3", "선택지4"],
-    "correct_answer": 0,
-    "explanation": "정답 설명"
-}}"""
-    else:
-        prompt = f"""Create a quiz about {landmark}.
+    prompt = f"""Create a quiz about {landmark}.
 
 Return in JSON format:
 {{
@@ -83,7 +65,98 @@ Return in JSON format:
     except Exception as e:
         logger.error(f"Quiz generation error: {e}", exc_info=True)
         return {
-            "question": "퀴즈를 생성할 수 없습니다." if language == "ko" else "Cannot generate quiz.",
+            "question": "Cannot generate quiz.",
             "options": ["A", "B", "C", "D"],
             "correct_answer": 0
         }
+
+
+def generate_route_recommendation(
+    candidate_quests: list,
+    preferences: dict,
+    completed_quest_ids: set,
+    language: str = "en"
+) -> list:
+    """AI-based travel itinerary recommendation"""
+    if not GEMINI_AVAILABLE:
+        logger.warning("Gemini not available, using fallback")
+        return []
+    
+    try:
+        # 후보 퀘스트 정보 정리
+        quest_info_list = []
+        for quest in candidate_quests[:20]:  # 상위 20개만 AI에 전달
+            quest_info = {
+                "id": quest.get("id"),
+                "name": quest.get("name", ""),
+                "category": quest.get("category", ""),
+                "district": quest.get("district", ""),
+                "latitude": quest.get("latitude"),
+                "longitude": quest.get("longitude"),
+                "reward_point": quest.get("reward_point", 100),
+                "completion_count": quest.get("completion_count", 0),
+                "description": quest.get("description", "")[:200]
+            }
+            quest_info_list.append(quest_info)
+        
+        # 선호도 정보 정리
+        theme = preferences.get("theme") or preferences.get("category") or "Seoul Travel"
+        if isinstance(theme, dict):
+            theme = theme.get("name", "Seoul Travel")
+        
+        districts = preferences.get("districts") or []
+        if isinstance(districts, list) and districts:
+            districts_str = ", ".join(districts)
+        else:
+            districts_str = "No restriction"
+        
+        prompt = f"""You are a Seoul travel expert. Recommend an optimal travel itinerary based on user preferences.
+
+[User Preferences]
+- Theme: {theme}
+- Preferred Districts: {districts_str}
+- Completed Quests: {len(completed_quest_ids)}
+
+[Candidate Quests]
+{json.dumps(quest_info_list, ensure_ascii=False, indent=2)}
+
+[Requirements]
+1. Select exactly 4 quests
+2. Exclude completed quests (IDs: {list(completed_quest_ids)[:10]})
+3. Consider theme and preferred districts
+4. Arrange in efficient order considering travel distance and time
+5. Consider category diversity
+
+Return in JSON format:
+{{
+    "selected_quest_ids": [quest ID array, 4 items],
+    "reasoning": "Selection reasoning",
+    "route_order": "Visit order explanation"
+}}"""
+        
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        
+        # JSON 추출
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        
+        result = json.loads(text.strip())
+        selected_ids = result.get("selected_quest_ids", [])
+        
+        # 선택된 퀘스트 반환
+        selected_quests = []
+        quest_dict = {q.get("id"): q for q in candidate_quests}
+        
+        for quest_id in selected_ids:
+            if quest_id in quest_dict:
+                selected_quests.append(quest_dict[quest_id])
+        
+        logger.info(f"AI recommended {len(selected_quests)} quests: {result.get('reasoning', '')[:100]}")
+        return selected_quests
+    
+    except Exception as e:
+        logger.error(f"AI route recommendation error: {e}", exc_info=True)
+        return []

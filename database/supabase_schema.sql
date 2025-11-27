@@ -145,6 +145,10 @@ CREATE TABLE IF NOT EXISTS user_quest_progress (
     status VARCHAR(20) DEFAULT 'in_progress',
     quiz_attempts INTEGER DEFAULT 0,
     quiz_correct BOOLEAN DEFAULT FALSE,
+    score INTEGER DEFAULT 0,
+    correct_count INTEGER DEFAULT 0,
+    used_hint BOOLEAN DEFAULT FALSE,
+    current_quiz INTEGER DEFAULT 0,
     completed_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, quest_id)
@@ -170,7 +174,7 @@ CREATE INDEX idx_points_created_at ON points(created_at);
 CREATE TABLE IF NOT EXISTS rewards (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    type VARCHAR(20) NOT NULL CHECK (type IN ('badge', 'coupon', 'item')),
+    type VARCHAR(20) NOT NULL CHECK (type IN ('badge', 'coupon', 'item', 'food', 'cafe', 'shopping', 'ticket', 'activity', 'entertainment', 'beauty', 'wellness')),
     point_cost INTEGER NOT NULL,
     description TEXT,
     image_url TEXT,
@@ -208,6 +212,12 @@ CREATE TABLE IF NOT EXISTS chat_logs (
     chat_session_id UUID,
     title TEXT,
     is_read_only BOOLEAN DEFAULT FALSE,
+    quest_step INT4,
+    options JSONB,
+    selected_districts JSONB,
+    selected_theme TEXT,
+    include_cart BOOLEAN DEFAULT FALSE,
+    prompt_step_text TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -654,7 +664,7 @@ VALUES
      '광화문광장에는 세종대왕 동상과 함께 이순신 장군 동상이 세워져 있습니다.',
      'medium'),
     
-    -- Myeongdong Cathedral 퀴즈
+    -- Myeongdong Cathedral 퀴즈 (5개)
     ((SELECT id FROM quests WHERE name = 'Myeongdong Cathedral' LIMIT 1),
      '명동성당이 완공된 연도는 언제인가요?',
      '["1895년", "1898년", "1900년", "1902년"]'::jsonb,
@@ -670,6 +680,30 @@ VALUES
      '첫 번째로 지어진 한국의 이 양식 성당입니다',
      '명동성당은 한국 최초의 고딕 양식 성당으로, 높은 첨탑과 아치형 창문이 특징입니다.',
      'easy'),
+    
+    ((SELECT id FROM quests WHERE name = 'Myeongdong Cathedral' LIMIT 1),
+     '명동성당은 일제강점기 당시 어떤 역할을 했나요?',
+     '["독립운동 비밀 회합 장소", "한국 최초의 은행 역할", "외국 공사관 숙소", "기상 관측소 역할"]'::jsonb,
+     0,
+     '민족운동의 상징적 공간.',
+     '명동성당은 독립운동가들의 비밀 회합 장소로 사용되며 민주-인권 운동의 상징적 공간이 되었다.',
+     'medium'),
+    
+    ((SELECT id FROM quests WHERE name = 'Myeongdong Cathedral' LIMIT 1),
+     '명동성당 내부 스테인드글라스는 주로 어떤 내용을 담고 있나요?',
+     '["예수와 성모 마리아의 생애", "한국 전통 민속 그림", "세계 4대 문명", "십자군 전쟁"]'::jsonb,
+     0,
+     '종교적 의미가 중심.',
+     '스테인드글라스는 예수-성모 마리아의 생애 등 성경 장면을 묘사한 것이 대부분이다.',
+     'medium'),
+    
+    ((SELECT id FROM quests WHERE name = 'Myeongdong Cathedral' LIMIT 1),
+     '명동성당이 한국 천주교의 상징으로 자리 잡은 이유는 무엇인가요?',
+     '["순교자 정신을 기리고 한국 천주교의 중심 역할을 했기 때문", "정부의 국교 건물로 지정되었기 때문", "세계 최초로 건립된 천주교 성당이기 때문", "유네스코 세계유산 등재 때문"]'::jsonb,
+     0,
+     '천주교·민주화 운동 상징성.',
+     '명동성당은 한국 천주교의 중심이며 민주화·인권 운동의 핵심 공간으로서 큰 상징성을 가진다.',
+     'hard'),
     
     -- Bukchon Hanok Village 퀴즈
     ((SELECT id FROM quests WHERE name = 'Bukchon Hanok Village' LIMIT 1),
@@ -689,13 +723,41 @@ VALUES
      'medium');
 
 -- Sample Rewards
-INSERT INTO rewards (name, type, point_cost, description, is_active)
+INSERT INTO rewards (name, type, point_cost, description, image_url, expire_date, is_active)
 VALUES
-    ('Seoul Travel Badge', 'badge', 50, 'Commemorative badge for completing your first quest', TRUE),
-    ('Cafe Discount Coupon', 'coupon', 100, '20% discount at partner cafes in Seoul', TRUE),
-    ('Gyeongbokgung Palace Admission Ticket', 'coupon', 200, 'Free admission ticket to Gyeongbokgung Palace', TRUE),
-    ('Seoul Tour Master Badge', 'badge', 500, 'Commemorative badge for completing all quests', TRUE),
-    ('Hanbok Experience Coupon', 'coupon', 300, '50% discount on hanbok rental', TRUE);
+    ('Seoul Travel Badge', 'badge', 50, 'Commemorative badge for completing your first quest', NULL, NULL, TRUE),
+    ('Cafe Discount Coupon', 'coupon', 100, '20% discount at partner cafes in Seoul', NULL, NULL, TRUE),
+    ('Gyeongbokgung Palace Admission Ticket', 'coupon', 200, 'Free admission ticket to Gyeongbokgung Palace', NULL, NULL, TRUE),
+    ('Seoul Tour Master Badge', 'badge', 500, 'Commemorative badge for completing all quests', NULL, NULL, TRUE),
+    ('Hanbok Experience Coupon', 'coupon', 300, '50% discount on hanbok rental', NULL, NULL, TRUE),
+    -- FOOD
+    ('Shrimp Gyoza Dumpling', 'food', 200, 'Fresh handmade shrimp dumplings', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Bibimbap Meal Kit', 'food', 250, 'Korean traditional bibimbap set', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Tteokbokki Cup', 'food', 120, 'Spicy rice cake cup', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Korean Fried Chicken Snack', 'food', 180, 'Small crispy chicken set', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    -- CAFE
+    ('Americano (Hot/Iced)', 'cafe', 150, 'Standard Americano coffee', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Vanilla Latte', 'cafe', 190, 'Sweet vanilla latte drink', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Matcha Latte', 'cafe', 200, 'Japanese matcha green latte', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Cheesecake Slice', 'cafe', 220, 'New York cheesecake slice', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    -- SHOPPING
+    ('Korean Flag Keychain', 'shopping', 100, 'Korean themed souvenir keychain', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Hanbok Mini Figure', 'shopping', 300, 'Miniature Hanbok doll figure', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('City Postcard Set', 'shopping', 80, 'Seoul city postcard set', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Korean Socks Pack', 'shopping', 140, 'Funny Korean socks 1-pack', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    -- TICKET
+    ('Museum Entry Ticket', 'ticket', 350, 'Entry ticket for museum', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Han River Cruise Ticket', 'ticket', 500, '30-minute Han river cruise', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    -- ACTIVITY
+    ('Pottery Experience Class', 'activity', 600, '1-hour pottery class experience', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Korean Calligraphy Class', 'activity', 450, 'Traditional Korean calligraphy class', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    -- ENTERTAINMENT
+    ('VR Arcade Ticket', 'entertainment', 400, 'VR arcade shooting game ticket', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Karaoke 30-Min Pass', 'entertainment', 250, '30 minutes at Karaoke room', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    -- BEAUTY & WELLNESS
+    ('Hand Spa Treatment', 'beauty', 350, 'Relaxing hand spa treatment', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true),
+    ('Fitness 1-Day Pass', 'wellness', 300, 'Gym access for one day', 'https://placehold.co/300×300?text=Reward', now() + interval '60 days', true)
+ON CONFLICT DO NOTHING;
 
 -- Table Comments
 COMMENT ON TABLE users IS '사용자 정보';
@@ -705,6 +767,10 @@ COMMENT ON TABLE quests IS '장소 기반 퀘스트 (VLM places 연동 가능)';
 COMMENT ON TABLE quest_quizzes IS '퀘스트별 객관식 퀴즈';
 COMMENT ON TABLE user_quests IS '사용자별 퀘스트 진행 상황';
 COMMENT ON TABLE user_quest_progress IS '사용자별 퀘스트 & 퀴즈 상세 진행 상황';
+COMMENT ON COLUMN user_quest_progress.score IS 'Total quiz score (max 100 points)';
+COMMENT ON COLUMN user_quest_progress.correct_count IS 'Number of correct answers';
+COMMENT ON COLUMN user_quest_progress.used_hint IS 'Whether hint was used in current question';
+COMMENT ON COLUMN user_quest_progress.current_quiz IS 'Current quiz number (0-4 for 5 questions)';
 COMMENT ON TABLE points IS '포인트 트랜잭션 로그';
 COMMENT ON TABLE rewards IS '포인트로 교환 가능한 리워드 아이템';
 COMMENT ON TABLE user_rewards IS '사용자가 획득한 리워드 목록';

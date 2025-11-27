@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import base64
 import uuid
+import os
 import logging
 from datetime import datetime
 
@@ -23,7 +24,7 @@ router = APIRouter()
 
 class ExploreRAGChatRequest(BaseModel):
     user_message: str
-    language: str = "ko"
+    language: str = "en"
     prefer_url: bool = False
     enable_tts: bool = True
     chat_session_id: Optional[str] = None
@@ -33,7 +34,7 @@ class QuestRAGChatRequest(BaseModel):
     quest_id: int
     user_message: str
     landmark: Optional[str] = None
-    language: str = "ko"
+    language: str = "en"
     prefer_url: bool = False
     enable_tts: bool = True
     chat_session_id: Optional[str] = None
@@ -43,7 +44,7 @@ class QuestVLMChatRequest(BaseModel):
     quest_id: int
     image: str  # base64
     user_message: Optional[str] = None
-    language: str = "ko"
+    language: str = "en"
     prefer_url: bool = False
     enable_tts: bool = True
     chat_session_id: Optional[str] = None
@@ -51,7 +52,7 @@ class QuestVLMChatRequest(BaseModel):
 
 class STTTTSRequest(BaseModel):
     audio: str  # base64 encoded audio
-    language_code: str = "ko-KR"
+    language_code: str = "en-US"
     prefer_url: bool = False
 
 
@@ -132,20 +133,20 @@ def build_quest_context_block(quest: Dict[str, Any]) -> str:
     """Build structured context text for LLM prompts."""
     place = quest.get("place") or {}
     lines = [
-        f"퀘스트 장소: {quest.get('name') or place.get('name', '')}",
+        f"Quest Place: {quest.get('name') or place.get('name', '')}",
     ]
     if place.get("address"):
-        lines.append(f"주소: {place['address']}")
+        lines.append(f"Address: {place['address']}")
     if place.get("district"):
-        lines.append(f"행정구역: {place['district']}")
+        lines.append(f"District: {place['district']}")
     if place.get("category") or quest.get("category"):
-        lines.append(f"카테고리: {quest.get('category') or place.get('category')}")
+        lines.append(f"Category: {quest.get('category') or place.get('category')}")
     if quest.get("reward_point"):
-        lines.append(f"획득 포인트: {quest['reward_point']}점")
+        lines.append(f"Reward Points: {quest['reward_point']} points")
     if quest.get("description"):
-        lines.append(f"장소 설명: {quest['description']}")
+        lines.append(f"Place Description: {quest['description']}")
     elif place.get("description"):
-        lines.append(f"장소 설명: {place['description']}")
+        lines.append(f"Place Description: {place['description']}")
     return "\n".join(lines)
 
 
@@ -339,7 +340,7 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
 async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depends(get_current_user_id)):
     """
     탐색 모드 - 일반 RAG 채팅 (텍스트만 저장)
-    Pinecone에 저장된 장소 description을 RAG로 검색하여 답변 생성
+    Pinecone에 저장된 장소 텍스트 임베딩을 벡터 검색하여 답변 생성
     """
     try:
         logger.info(f"Explore RAG chat: {user_id}")
@@ -352,30 +353,105 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
         # 사용자 메시지를 임베딩하여 유사한 장소 검색
         text_embedding = generate_text_embedding(request.user_message)
         
-        # Pinecone에서 유사한 장소 검색 (description 기반)
-        # TODO: Pinecone에 place description 임베딩이 저장되어 있어야 함
-        # 현재는 DB에서 직접 검색하는 방식으로 구현
-        db = get_db()
+        if not text_embedding:
+            logger.warning("Failed to generate text embedding, falling back to DB search")
+            # 폴백: DB 텍스트 검색
+            db = get_db()
+            places_result = db.rpc(
+                "search_places_by_rag_text",
+                {
+                    "search_query": request.user_message,
+                    "limit_count": 3
+                }
+            ).execute()
+            
+            context = ""
+            if places_result.data:
+                place_names = [p.get("name", "") for p in places_result.data[:3]]
+                context = f"관련 장소: {', '.join(place_names)}\n\n"
+        else:
+            # Pinecone 벡터 검색
+            from services.pinecone_store import search_text_embeddings
+            
+            similar_places = search_text_embeddings(
+                text_embedding=text_embedding,
+                match_threshold=0.65,
+                match_count=5
+            )
+            
+            # 컨텍스트 구성
+            context_parts = []
+            if similar_places:
+                context_parts.append("Related Places Information:")
+                for idx, sp in enumerate(similar_places[:3], 1):
+                    place = sp.get("place")
+                    if place:
+                        place_info = []
+                        if place.get("name"):
+                            place_info.append(f"Name: {place['name']}")
+                        if place.get("category"):
+                            place_info.append(f"Category: {place['category']}")
+                        if place.get("address"):
+                            place_info.append(f"Address: {place['address']}")
+                        if place.get("description"):
+                            desc = place['description'][:200] + "..." if len(place['description']) > 200 else place['description']
+                            place_info.append(f"Description: {desc}")
+                        
+                        context_parts.append(f"\n{idx}. {' | '.join(place_info)}")
+                
+                context_parts.append("")
+                context = "\n".join(context_parts)
+            else:
+                # 벡터 검색 실패 시 DB 검색으로 폴백
+                db = get_db()
+                places_result = db.rpc(
+                    "search_places_by_rag_text",
+                    {
+                        "search_query": request.user_message,
+                        "limit_count": 3
+                    }
+                ).execute()
+                
+                if places_result.data:
+                    place_names = [p.get("name", "") for p in places_result.data[:3]]
+                    context = f"Related Places: {', '.join(place_names)}\n\n"
+                else:
+                    context = ""
         
-        # RAG 검색: places 테이블의 metadata->>'rag_text'에서 검색
-        places_result = db.rpc(
-            "search_places_by_rag_text",
-            {
-                "search_query": request.user_message,
-                "limit_count": 3
-            }
-        ).execute()
-        
-        context = ""
-        if places_result.data:
-            place_names = [p.get("name", "") for p in places_result.data[:3]]
-            context = f"관련 장소: {', '.join(place_names)}\n\n"
+        # 이전 대화 히스토리 가져오기 (멀티 턴 대화 지원)
+        chat_history = ""
+        if session_id:
+            try:
+                db = get_db()
+                history_result = db.table("chat_logs") \
+                    .select("user_message, ai_response") \
+                    .eq("chat_session_id", session_id) \
+                    .eq("user_id", user_id) \
+                    .order("created_at", desc=True) \
+                    .limit(3) \
+                    .execute()
+                
+                if history_result.data and len(history_result.data) > 0:
+                    history_parts = ["Previous Conversation:"]
+                    for chat in reversed(history_result.data):  # 시간순으로 정렬
+                        if chat.get("user_message"):
+                            history_parts.append(f"User: {chat['user_message']}")
+                        if chat.get("ai_response"):
+                            history_parts.append(f"AI: {chat['ai_response'][:150]}...")
+                    history_parts.append("")
+                    chat_history = "\n".join(history_parts)
+            except Exception as hist_error:
+                logger.warning(f"Failed to load chat history: {hist_error}")
         
         # AI 응답 생성
+        full_prompt = f"""{context}{chat_history}Question: {request.user_message}
+
+Please provide a friendly and helpful response based on the above information."""
+        
         ai_response = generate_docent_message(
-            landmark="서울 여행지",
-            user_message=f"{context}질문: {request.user_message}",
-            language=request.language
+            landmark="Seoul Travel",
+            user_message=full_prompt,
+            language="en"
         )
         
         # TTS 생성
@@ -384,7 +460,7 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
         
         if request.enable_tts:
             try:
-                language_code = f"{request.language}-KR" if request.language == "ko" else "en-US"
+                language_code = "en-US"
                 
                 if request.prefer_url:
                     audio_url, audio_base64 = text_to_speech_url(
@@ -457,18 +533,18 @@ async def quest_rag_chat(request: QuestRAGChatRequest, user_id: str = Depends(ge
 
         session_id = request.chat_session_id or str(uuid.uuid4())
 
-        landmark = quest.get("name") or quest.get("title") or request.landmark or "퀘스트 장소"
+        landmark = quest.get("name") or quest.get("title") or request.landmark or "Quest Place"
         context_block = build_quest_context_block(quest)
-        user_prompt = f"""다음은 사용자가 진행 중인 퀘스트 장소에 대한 정보입니다:
+        user_prompt = f"""The following is information about the quest place the user is currently working on:
 {context_block}
 
-위 정보를 참고해 아래 질문에 답해주세요.
-질문: {request.user_message}"""
+Please answer the following question based on the above information.
+Question: {request.user_message}"""
         
         ai_response = generate_docent_message(
             landmark=landmark,
             user_message=user_prompt,
-            language=request.language
+            language="en"
         )
         
         # TTS 생성
@@ -477,7 +553,7 @@ async def quest_rag_chat(request: QuestRAGChatRequest, user_id: str = Depends(ge
         
         if request.enable_tts:
             try:
-                language_code = f"{request.language}-KR" if request.language == "ko" else "en-US"
+                language_code = "en-US"
                 
                 if request.prefer_url:
                     audio_url, audio_base64 = text_to_speech_url(
@@ -571,11 +647,12 @@ async def quest_vlm_chat(request: QuestVLMChatRequest, user_id: str = Depends(ge
         # 주변 장소 검색 (GPS 정보가 없으면 빈 리스트)
         nearby_places = []
         
-        # VLM 분석
+        # VLM 분석 (퀘스트 컨텍스트 포함)
         vlm_response = analyze_place_image(
             image_bytes=image_bytes,
             nearby_places=nearby_places,
-            language=request.language
+            language="en",
+            quest_context=quest  # 퀘스트 정보를 VLM 프롬프트에 포함
         )
         
         if not vlm_response:
@@ -593,21 +670,21 @@ async def quest_vlm_chat(request: QuestVLMChatRequest, user_id: str = Depends(ge
         if matched_place:
             from services.ai import generate_docent_message
             enhancement_prompt = f"""
-VLM 분석 결과:
+VLM Analysis Result:
 {vlm_response}
 
-장소 정보:
-- 이름: {matched_place.get('name')}
-- 카테고리: {matched_place.get('category')}
-- 설명: {matched_place.get('description')}
+Place Information:
+- Name: {matched_place.get('name')}
+- Category: {matched_place.get('category')}
+- Description: {matched_place.get('description')}
 
-위 정보를 바탕으로 AR 도슨트처럼 친근하고 흥미롭게 3-4문장으로 이 장소를 소개해주세요.
+Based on the above information, please introduce this place in a friendly and engaging way in 3-4 sentences, like an AR docent.
 """
             try:
                 final_description = generate_docent_message(
-                    landmark=matched_place.get('name', '이 장소'),
-                    user_message=enhancement_prompt if request.language == "ko" else None,
-                    language=request.language
+                    landmark=matched_place.get('name', 'This place'),
+                    user_message=enhancement_prompt,
+                    language="en"
                 )
             except Exception as e:
                 logger.warning(f"Description enhancement failed: {e}")
@@ -616,7 +693,7 @@ VLM 분석 결과:
         quest_context = build_quest_context_block(quest)
         ai_response = f"""{ai_response}
 
-현재 진행 중인 퀘스트 참고 정보:
+Current Quest Reference Information:
 {quest_context}"""
         
         # TTS 생성
@@ -625,7 +702,7 @@ VLM 분석 결과:
         
         if request.enable_tts:
             try:
-                language_code = f"{request.language}-KR" if request.language == "ko" else "en-US"
+                language_code = "en-US"
                 
                 if request.prefer_url:
                     audio_url, audio_base64 = text_to_speech_url(
@@ -1049,29 +1126,61 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         # 5. 종합 점수로 정렬
         scored_quests.sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
         
-        # 6. 추천 퀘스트 선택 (필수 방문 장소 포함)
-        recommended_quests = []
-        if must_visit_quest:
-            recommended_quests.append(must_visit_quest)
-            # 나머지 3개 선택
-            remaining_count = 3
-        else:
-            remaining_count = 4
+        # 6. AI 기반 추천 또는 점수 기반 추천
+        use_ai_recommendation = os.getenv("USE_AI_ROUTE_RECOMMENDATION", "true").lower() == "true"
         
-        # 상위 점수 퀘스트 선택
-        for quest in scored_quests[:remaining_count * 2]:  # 여유있게 선택
-            if len(recommended_quests) >= 4:
-                break
-
-            # 중복 제거 (같은 장소는 하나만)
-            place_id = quest.get("place_id")
-            if any(rq.get("place_id") == place_id for rq in recommended_quests):
-                continue
-
-            recommended_quests.append(quest)
-
-        # 4개로 맞추기
-        recommended_quests = recommended_quests[:4]
+        if use_ai_recommendation and len(scored_quests) >= 4:
+            # AI 기반 추천 시도
+            from services.ai import generate_route_recommendation
+            
+            ai_recommended = generate_route_recommendation(
+                candidate_quests=scored_quests[:20],  # 상위 20개 후보
+                preferences=request.preferences,
+                completed_quest_ids=completed_quest_ids,
+                language="en"
+            )
+            
+            if ai_recommended and len(ai_recommended) >= 4:
+                recommended_quests = ai_recommended[:4]
+                logger.info("Using AI-based recommendation")
+            else:
+                # AI 추천 실패 시 점수 기반으로 폴백
+                recommended_quests = []
+                if must_visit_quest:
+                    recommended_quests.append(must_visit_quest)
+                    remaining_count = 3
+                else:
+                    remaining_count = 4
+                
+                for quest in scored_quests[:remaining_count * 2]:
+                    if len(recommended_quests) >= 4:
+                        break
+                    place_id = quest.get("place_id")
+                    if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                        continue
+                    recommended_quests.append(quest)
+                
+                recommended_quests = recommended_quests[:4]
+                logger.info("Using score-based recommendation (AI fallback)")
+        else:
+            # 점수 기반 추천 (기존 방식)
+            recommended_quests = []
+            if must_visit_quest:
+                recommended_quests.append(must_visit_quest)
+                remaining_count = 3
+            else:
+                remaining_count = 4
+            
+            for quest in scored_quests[:remaining_count * 2]:
+                if len(recommended_quests) >= 4:
+                    break
+                place_id = quest.get("place_id")
+                if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                    continue
+                recommended_quests.append(quest)
+            
+            recommended_quests = recommended_quests[:4]
+            logger.info("Using score-based recommendation")
         
         # 세션 ID 생성
         session_id = str(uuid.uuid4())
