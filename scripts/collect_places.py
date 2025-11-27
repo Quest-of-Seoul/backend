@@ -126,7 +126,7 @@ def collect_category_places(
     category: str,
     max_places: Optional[int] = None,
     area_code: str = "1",
-    delay_between_api_calls: float = 0.5,
+    delay_between_api_calls: float = 1.0,
     create_embeddings: bool = True,
     lang_code_id: str = "en"
 ) -> Dict:
@@ -339,8 +339,8 @@ def main():
     parser.add_argument(
         "--delay",
         type=float,
-        default=0.5,
-        help="Delay between API calls in seconds (default: 0.5)"
+        default=1.0,
+        help="Delay between API calls in seconds (default: 1.0)"
     )
     parser.add_argument(
         "--lang-code",

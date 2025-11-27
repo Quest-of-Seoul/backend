@@ -782,7 +782,7 @@ def collect_all_places_by_category(
     category_sn: Optional[str] = None,
     lang_code_id: str = "en",
     max_places: Optional[int] = None,
-    delay_between_pages: float = 0.5
+    delay_between_pages: float = 1.0
 ) -> List[Dict]:
     """
     카테고리별 모든 장소 수집 (여러 페이지)

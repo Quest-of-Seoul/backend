@@ -186,7 +186,7 @@ python scripts/collect_places.py --category Events --max-places 50
   - 서울: "1"
   - 예: `--area-code 1`
 
-- `--delay`: API 호출 간 지연 시간 초 (기본값: 0.5)
+- `--delay`: API 호출 간 지연 시간 초 (기본값: 1.0)
   - API 호출 제한을 피하기 위해 사용
   - 예: `--delay 1.0` (1초 대기)
 
