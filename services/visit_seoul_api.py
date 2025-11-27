@@ -198,7 +198,7 @@ def get_api_headers() -> Dict[str, str]:
     }
 
 
-def get_category_list(lang_code_id: str = "en", retry_count: int = 3, retry_delay: float = 1.0) -> List[Dict]:
+def get_category_list(lang_code_id: str = "en", retry_count: int = 5, retry_delay: float = 1.0) -> List[Dict]:
     """
     카테고리 목록 조회
     
@@ -251,7 +251,7 @@ def get_category_list(lang_code_id: str = "en", retry_count: int = 3, retry_dela
 def map_category_to_visit_seoul_sn(
     category: str,
     lang_code_id: str = "en",
-    retry_count: int = 3,
+    retry_count: int = 5,
     retry_delay: float = 1.0
 ) -> Optional[List[str]]:
     """
@@ -399,7 +399,7 @@ def map_category_to_visit_seoul_sn(
     return None
 
 
-def get_lang_code_list(retry_count: int = 3, retry_delay: float = 1.0) -> List[Dict]:
+def get_lang_code_list(retry_count: int = 5, retry_delay: float = 1.0) -> List[Dict]:
     """
     언어 코드 목록 조회
     
@@ -450,7 +450,7 @@ def search_places_by_category(
     keyword: Optional[str] = None,
     sort_type: str = "latest",
     page_no: int = 1,
-    retry_count: int = 3,
+    retry_count: int = 5,
     retry_delay: float = 1.0
 ) -> Dict:
     """
@@ -540,7 +540,7 @@ def search_places_by_category(
 
 def get_place_detail(
     cid: str,
-    retry_count: int = 3,
+    retry_count: int = 5,
     retry_delay: float = 1.0
 ) -> Optional[Dict]:
     """
