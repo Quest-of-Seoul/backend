@@ -157,106 +157,113 @@ async def get_chat_list(
     user_id: str = Depends(get_current_user_id)
 ):
     """
-    채팅 리스트 조회 (하프 모달용)
-    일반 채팅(rag_chat)과 여행 일정(route_recommend)만 반환
+    채팅 리스트 조회
+    - mode: explore | quest
+    - function_type:
+        rag_chat, vlm_chat, route_recommend
     """
     try:
         db = get_db()
-        
-        query = db.table("chat_logs").select("*").eq("user_id", user_id)
-        if mode:
-            query = query.eq("mode", mode)
-            logger.info(f"Filtering by mode: {mode}")
-        if function_type:
-            query = query.eq("function_type", function_type)
-            logger.info(f"Filtering by function_type: {function_type}")
-        else:
-            query = query.in_("function_type", ["rag_chat", "route_recommend", "vlm_chat"])
-            logger.info("Filtering by function_type: all types (rag_chat, route_recommend, vlm_chat)")
 
+        # 기본 query
+        query = db.table("chat_logs").select("*").eq("user_id", user_id)
+
+        # 🔥 mode + function_type 조합 필터링
+        if mode and function_type:
+            # 둘 다 지정된 경우 정확히 필터
+            query = query.eq("mode", mode).eq("function_type", function_type)
+
+        elif mode:
+            query = query.eq("mode", mode)
+
+            # mode에 따른 function_type 제한
+            if mode == "quest":
+                # quest 모드에서는 rag_chat + vlm_chat만
+                query = query.in_("function_type", ["rag_chat", "vlm_chat"])
+            elif mode == "explore":
+                # explore는 rag_chat + route
+                query = query.in_("function_type", ["rag_chat", "route_recommend"])
+
+        elif function_type:
+            # function_type만 지정된 경우
+            query = query.eq("function_type", function_type)
+
+            # route_recommend는 explore 모드만 존재
+            if function_type == "route_recommend":
+                query = query.eq("mode", "explore")
+
+        else:
+            # 🔥 기본값: explore + rag_chat
+            query = query.eq("mode", "explore").eq("function_type", "rag_chat")
+
+        # 결과 가져오기
         result = query.order("created_at", desc=True).limit(limit * 10).execute()
-        logger.info(f"Found {len(result.data)} chat logs for user {user_id}")
-        
-        # 세션별로 그룹화
+
+        # 세션 그룹화
         sessions = {}
         vlm_count = 0
         rag_count = 0
         route_count = 0
-        
+
         for chat in result.data:
-            # 디버깅: function_type 카운트
             ft = chat.get("function_type")
-            if ft == "vlm_chat":
-                vlm_count += 1
-            elif ft == "rag_chat":
-                rag_count += 1
-            elif ft == "route_recommend":
-                route_count += 1
-            
+            if ft == "vlm_chat": vlm_count += 1
+            elif ft == "route_recommend": route_count += 1
+            else: rag_count += 1
+
             session_id = chat.get("chat_session_id")
             if not session_id:
-                logger.debug(f"Skipping chat without session_id: {chat.get('id')}")
-                continue  # 세션 ID가 없으면 스킵
-            
+                continue
+
+            # 새 세션 생성
             if session_id not in sessions:
-                # 제목: title 필드가 있으면 사용, 없으면 첫 질문 사용
-                title = chat.get("title")
-                if not title and chat.get("user_message"):
-                    title = chat.get("user_message", "")[:50]
-                
+                title = chat.get("title") or (chat.get("user_message") or "")[:50]
+
                 sessions[session_id] = {
                     "session_id": session_id,
-                    "function_type": chat.get("function_type", "rag_chat"),
-                    "mode": chat.get("mode", "explore"),
-                    "title": title or "",
+                    "function_type": ft,
+                    "mode": chat.get("mode"),
+                    "title": title,
                     "is_read_only": chat.get("is_read_only", False),
                     "created_at": chat.get("created_at"),
                     "updated_at": chat.get("created_at"),
                     "time_ago": format_time_ago(chat.get("created_at")),
                     "chats": []
                 }
-            
-            chat_item = {
+
+            # 세션에 메시지 추가
+            sessions[session_id]["chats"].append({
                 "id": chat.get("id"),
                 "user_message": chat.get("user_message"),
                 "ai_response": chat.get("ai_response"),
                 "image_url": chat.get("image_url"),
-                "created_at": chat.get("created_at")
-            }
-            
-            # 🔥 Route recommend 전용 필드 추가 (모든 필드를 각 chat에 복사)
-            if ft == "route_recommend":
-                chat_item.update({
-                    "title": chat.get("title"),
-                    "selected_theme": chat.get("selected_theme"),
-                    "selected_districts": chat.get("selected_districts"),
-                    "include_cart": chat.get("include_cart"),
-                    "quest_step": chat.get("quest_step"),
-                    "prompt_step_text": chat.get("prompt_step_text"),
-                })
-                logger.debug(f"Route recommend chat item: title={chat.get('title')}, theme={chat.get('selected_theme')}, districts={chat.get('selected_districts')}")
-            
-            sessions[session_id]["chats"].append(chat_item)
-            
-            # 최신 업데이트 시간 갱신
+                "quest_step": chat.get("quest_step"),
+                "options": chat.get("options"),
+                "selected_districts": chat.get("selected_districts"),
+                "selected_theme": chat.get("selected_theme"),
+                "include_cart": chat.get("include_cart"),
+                "prompt_step_text": chat.get("prompt_step_text"),
+                "created_at": chat.get("created_at"),
+            })
+
+            # 최신순 업데이트
             if chat.get("created_at") > sessions[session_id]["updated_at"]:
                 sessions[session_id]["updated_at"] = chat.get("created_at")
                 sessions[session_id]["time_ago"] = format_time_ago(chat.get("created_at"))
-        
-        # 세션 리스트로 변환 (최신순)
-        session_list = list(sessions.values())
-        session_list.sort(key=lambda x: x["updated_at"], reverse=True)
-        session_list = session_list[:limit]  # 최종 limit 적용
-        
-        logger.info(f"Chat breakdown - VLM: {vlm_count}, RAG: {rag_count}, Route: {route_count}")
-        logger.info(f"Retrieved {len(session_list)} chat sessions for user: {user_id}")
-        
+
+        # 정렬
+        session_list = sorted(
+            sessions.values(),
+            key=lambda x: x["updated_at"],
+            reverse=True
+        )[:limit]
+
         return {
             "success": True,
             "sessions": session_list,
             "count": len(session_list)
         }
-    
+
     except Exception as e:
         logger.error(f"Chat list error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching chat list: {str(e)}")
