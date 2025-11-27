@@ -40,6 +40,7 @@ class QuestStartRequest(BaseModel):
 
 class QuestQuizAnswerRequest(BaseModel):
     answer: int
+    is_last_quiz: bool = False  # Indicates if this is the last quiz in the quest
 
 
 class NearbyQuestRequest(BaseModel):
@@ -405,12 +406,18 @@ async def get_quest_quizzes(quest_id: int):
 @router.post("/{quest_id}/quizzes/{quiz_id}/submit")
 async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswerRequest, user_id: str = Depends(get_current_user_id)):
     """
-    Submit quiz answer, update user quest status, and award points when the quiz tied to the quest is cleared.
+    Submit quiz answer with scoring system:
+    - First attempt correct: 20 points
+    - First attempt wrong: 0 points, retry with hint allowed
+    - Second attempt (after hint) correct: 10 points
+    - Second attempt wrong: 0 points
+    - Quest completes when total score reaches 100 points
     """
     try:
         db = get_db()
         ensure_user_exists(user_id)
 
+        # Get quiz data
         quiz_result = db.table("quest_quizzes") \
             .select("*") \
             .eq("id", quiz_id) \
@@ -424,7 +431,7 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
         quiz = quiz_result.data
         is_correct = quiz["correct_answer"] == request.answer
 
-        # Update progress attempts
+        # Get current progress
         progress_result = db.table("user_quest_progress") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -432,27 +439,81 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
             .limit(1) \
             .execute()
 
-        attempts = 1
+        # Initialize or get current state
+        current_score = 0
+        quiz_attempts = 0
+        correct_count = 0
+        used_hint = False
+        
         if progress_result.data:
-            attempts = (progress_result.data[0].get("quiz_attempts", 0) or 0) + 1
+            progress = progress_result.data[0]
+            current_score = progress.get("score", 0) or 0
+            quiz_attempts = progress.get("quiz_attempts", 0) or 0
+            correct_count = progress.get("correct_count", 0) or 0
+            used_hint = progress.get("used_hint", False) or False
 
-        db.table("user_quest_progress").upsert({
-            "user_id": user_id,
-            "quest_id": quest_id,
-            "quiz_attempts": attempts,
-            "quiz_correct": is_correct,
-            "status": "completed" if is_correct else "in_progress",
-            "completed_at": datetime.now().isoformat() if is_correct else None
-        }).execute()
-
-        points_awarded = 0
-        already_completed = False
-        new_balance = None
-
+        # Calculate earned points for this attempt
+        earned = 0
+        retry_allowed = False
+        
         if is_correct:
+            if quiz_attempts == 0:
+                # First attempt correct
+                earned = 20
+            else:
+                # Second attempt (after hint) correct
+                earned = 10
+            correct_count += 1
+        else:
+            if quiz_attempts == 0:
+                # First attempt wrong - allow retry with hint
+                retry_allowed = True
+                used_hint = True
+            # Second attempt wrong - no points
+
+        quiz_attempts += 1
+        new_score = current_score + earned
+
+        # Update progress data
+        update_data = {
+            "quiz_attempts": quiz_attempts,
+            "quiz_correct": is_correct,
+            "score": new_score,
+            "correct_count": correct_count,
+            "used_hint": used_hint,
+        }
+
+        # Quest completes when all quizzes are answered (indicated by is_last_quiz flag)
+        quest_completed = request.is_last_quiz
+        
+        if quest_completed:
+            update_data["status"] = "completed"
+            update_data["completed_at"] = datetime.now().isoformat()
+        else:
+            update_data["status"] = "in_progress"
+
+        # Update or insert progress
+        if progress_result.data:
+            db.table("user_quest_progress") \
+                .update(update_data) \
+                .eq("user_id", user_id) \
+                .eq("quest_id", quest_id) \
+                .execute()
+        else:
+            update_data["user_id"] = user_id
+            update_data["quest_id"] = quest_id
+            db.table("user_quest_progress").insert(update_data).execute()
+
+        # Award quest reward points if completed
+        points_awarded = 0
+        new_balance = None
+        already_completed = False
+
+        if quest_completed:
             quest_result = db.table("quests").select("reward_point, name").eq("id", quest_id).single().execute()
             quest_data = quest_result.data
 
+            # Check if already completed
             user_quest = db.table("user_quests") \
                 .select("status") \
                 .eq("user_id", user_id) \
@@ -462,9 +523,7 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
 
             already_completed = bool(user_quest.data and user_quest.data[0].get("status") == "completed")
 
-            if already_completed:
-                logger.info(f"User {user_id} already completed quest {quest_id}, skipping award.")
-            else:
+            if not already_completed:
                 timestamp = datetime.now().isoformat()
                 if user_quest.data:
                     db.table("user_quests").update({
@@ -480,12 +539,13 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
                         "completed_at": timestamp
                     }).execute()
 
-                points_awarded = quest_data.get("reward_point", 0) if quest_data else 0
-                if points_awarded:
+                # Award points based on quiz score (not fixed reward_point)
+                points_awarded = new_score  # Award the actual quiz score as points
+                if points_awarded > 0:
                     db.table("points").insert({
                         "user_id": user_id,
                         "value": points_awarded,
-                        "reason": f"퀘스트 완료: {quest_data.get('name', '')}"
+                        "reason": f"퀘스트 완료: {quest_data.get('name', '')} ({points_awarded}점)"
                     }).execute()
 
             balance_result = db.rpc("get_user_points", {"user_uuid": user_id}).execute()
@@ -494,6 +554,11 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
         return {
             "success": True,
             "is_correct": is_correct,
+            "earned": earned,
+            "total_score": new_score,
+            "retry_allowed": retry_allowed,
+            "hint": quiz.get("hint") if retry_allowed else None,
+            "completed": quest_completed,
             "points_awarded": points_awarded,
             "already_completed": already_completed,
             "new_balance": new_balance,

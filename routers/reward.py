@@ -91,23 +91,37 @@ async def add_points(request: AddPointsRequest, user_id: str = Depends(get_curre
 
 
 @router.get("/list")
-async def get_available_rewards():
+async def get_available_rewards(
+    type: str | None = None,
+    search: str | None = None
+):
     """
-    Get all available rewards
+    Get available rewards with optional category filtering and search.
+    
+    Args:
+        type: Filter by reward type (food, cafe, shopping, ticket, activity, entertainment, beauty, wellness)
+        search: Search by reward name
     """
     try:
         db = get_db()
-        result = db.table("rewards") \
-            .select("*") \
-            .eq("is_active", True) \
-            .order("point_cost") \
-            .execute()
+        query = db.table("rewards").select("*").eq("is_active", True)
+        
+        if type:
+            query = query.eq("type", type)
+        
+        if search:
+            query = query.ilike("name", f"%{search}%")
+        
+        result = query.order("point_cost").execute()
+
+        logger.info(f"Fetched {len(result.data)} rewards (type={type}, search={search})")
 
         return {
             "rewards": result.data
         }
 
     except Exception as e:
+        logger.error(f"Error fetching rewards: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching rewards: {str(e)}")
 
 

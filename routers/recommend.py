@@ -275,7 +275,7 @@ async def get_quests_by_category(
 
 
 @router.get("/quests/{quest_id}")
-async def get_quest_detail(quest_id: str):
+async def get_quest_detail(quest_id: int):
     """Get quest detail with quizzes"""
     try:
         db = get_db()
@@ -322,8 +322,8 @@ async def get_quest_detail(quest_id: str):
 
 @router.post("/quests/{quest_id}/submit")
 async def submit_quiz_answer(
-    quest_id: str,
-    quiz_id: str,
+    quest_id: int,
+    quiz_id: int,
     answer: int,
     user_id: str = Depends(get_current_user_id)
 ):
@@ -338,18 +338,39 @@ async def submit_quiz_answer(
         
         is_correct = quiz.data["correct_answer"] == answer
         
+        # Check if progress record exists
+        existing_progress = db.table("user_quest_progress") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .eq("quest_id", quest_id) \
+            .limit(1) \
+            .execute()
+        
         progress_data = {
-            "user_id": user_id,
-            "quest_id": quest_id,
-            "quiz_attempts": 1,
             "quiz_correct": is_correct
         }
         
         if is_correct:
             progress_data["status"] = "completed"
-            progress_data["completed_at"] = "NOW()"
+            progress_data["completed_at"] = datetime.now().isoformat()
         
-        db.table("user_quest_progress").upsert(progress_data).execute()
+        if existing_progress.data:
+            # Update existing record
+            attempts = (existing_progress.data[0].get("quiz_attempts", 0) or 0) + 1
+            progress_data["quiz_attempts"] = attempts
+            
+            db.table("user_quest_progress") \
+                .update(progress_data) \
+                .eq("user_id", user_id) \
+                .eq("quest_id", quest_id) \
+                .execute()
+        else:
+            # Insert new record
+            progress_data["user_id"] = user_id
+            progress_data["quest_id"] = quest_id
+            progress_data["quiz_attempts"] = 1
+            
+            db.table("user_quest_progress").insert(progress_data).execute()
         
         if is_correct:
             quest = db.table("quests").select("completion_count").eq("id", quest_id).single().execute()

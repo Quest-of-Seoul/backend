@@ -492,7 +492,7 @@ RETURNS TABLE (
     name VARCHAR(255),
     category VARCHAR(50),
     rag_text TEXT,
-    similarity_score FLOAT
+    similarity_score REAL
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -502,13 +502,13 @@ BEGIN
         p.category,
         p.metadata->>'rag_text' AS rag_text,
         ts_rank(
-            to_tsvector('korean', COALESCE(p.metadata->>'rag_text', '')),
-            plainto_tsquery('korean', search_query)
+            to_tsvector('simple', COALESCE(p.metadata->>'rag_text', '')),
+            plainto_tsquery('simple', search_query)
         ) AS similarity_score
     FROM places p
     WHERE p.is_active = TRUE
         AND p.metadata->>'rag_text' IS NOT NULL
-        AND to_tsvector('korean', p.metadata->>'rag_text') @@ plainto_tsquery('korean', search_query)
+        AND to_tsvector('simple', p.metadata->>'rag_text') @@ plainto_tsquery('simple', search_query)
     ORDER BY similarity_score DESC
     LIMIT limit_count;
 END;
