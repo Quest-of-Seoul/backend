@@ -168,7 +168,7 @@ async def get_chat_list(
         # 기본 query
         query = db.table("chat_logs").select("*").eq("user_id", user_id)
 
-        # 🔥 mode + function_type 조합 필터링
+        # mode + function_type 조합 필터링
         if mode and function_type:
             # 둘 다 지정된 경우 정확히 필터
             query = query.eq("mode", mode).eq("function_type", function_type)
@@ -193,7 +193,7 @@ async def get_chat_list(
                 query = query.eq("mode", "explore")
 
         else:
-            # 🔥 기본값: explore + rag_chat
+            # 기본값: explore + rag_chat
             query = query.eq("mode", "explore").eq("function_type", "rag_chat")
 
         # 결과 가져오기
@@ -643,7 +643,7 @@ VLM 분석 결과:
         
         # VLM 분석 로그 저장 (vlm_logs - 분석용)
         try:
-            logger.info("💾 Saving VLM log to vlm_logs...")
+            logger.info("Saving VLM log to vlm_logs...")
             image_hash = hash_image(image_bytes)
             save_vlm_log(
                 user_id=user_id,
@@ -656,20 +656,20 @@ VLM 분석 결과:
                 matched_place_id=matched_place.get("id") if matched_place else None,
                 image_hash=image_hash
             )
-            logger.info("✅ VLM log saved to vlm_logs")
+            logger.info("VLM log saved to vlm_logs")
         except Exception as vlm_log_error:
-            logger.error(f"❌ Failed to save VLM log: {vlm_log_error}", exc_info=True)
+            logger.error(f"Failed to save VLM log: {vlm_log_error}", exc_info=True)
         
         # 히스토리에 저장 (chat_logs - 채팅 히스토리용)
         try:
-            logger.info(f"💾 Saving VLM chat to chat_logs (session: {session_id})...")
+            logger.info(f"Saving VLM chat to chat_logs (session: {session_id})...")
             
-            # 🔥 Image URL 검증
+            # Image URL 검증
             if not image_url:
-                logger.error("❌ Image URL is empty - upload may have failed!")
+                logger.error("Image URL is empty - upload may have failed!")
                 raise HTTPException(status_code=500, detail="Image upload failed: url is empty")
             
-            logger.info(f"📸 Image URL: {image_url}")
+            logger.info(f"Image URL: {image_url}")
             
             existing_session = db.table("chat_logs").select("id").eq("chat_session_id", session_id).limit(1).execute()
             is_first_message = not existing_session.data
@@ -684,15 +684,15 @@ VLM 분석 결과:
                 "chat_session_id": session_id,
                 "title": title_value if is_first_message else None,
                 "landmark": title_value,
-                "image_url": image_url,  # 🔥 반드시 포함
+                "image_url": image_url,
                 "is_read_only": True
             }
-            logger.info(f"📝 Chat data to save: mode={chat_data['mode']}, function_type={chat_data['function_type']}, session={session_id}, has_image={bool(image_url)}")
+            logger.info(f"Chat data to save: mode={chat_data['mode']}, function_type={chat_data['function_type']}, session={session_id}, has_image={bool(image_url)}")
             
             result = db.table("chat_logs").insert(chat_data).execute()
-            logger.info(f"✅ VLM chat saved to chat_logs (id: {result.data[0]['id'] if result.data else 'unknown'})")
+            logger.info(f"VLM chat saved to chat_logs (id: {result.data[0]['id'] if result.data else 'unknown'})")
         except Exception as db_error:
-            logger.error(f"❌ Failed to save quest VLM chat log: {db_error}", exc_info=True)
+            logger.error(f"Failed to save quest VLM chat log: {db_error}", exc_info=True)
             raise
         
         response = {
@@ -787,7 +787,7 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 quests = place.get("quests", [])
                 if quests and len(quests) > 0:
                     must_visit_quest = dict(quests[0])
-                    # 🔥 place 정보 추가 (district, place_image_url 등)
+                    # place 정보 추가 (district, place_image_url 등)
                     must_visit_quest["district"] = place.get("district")
                     must_visit_quest["place_image_url"] = place.get("image_url")
         
@@ -1060,7 +1060,7 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         
         # 상위 점수 퀘스트 선택
         for quest in scored_quests[:remaining_count * 2]:  # 여유있게 선택
-            if len(recommended_quests) >= 4:  # 🔥 총 4개가 되도록 수정
+            if len(recommended_quests) >= 4:
                 break
 
             # 중복 제거 (같은 장소는 하나만)
@@ -1083,7 +1083,7 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         
         # 채팅 기록 저장 (여행 일정 - 보기 전용)
         try:
-            # 🔥 quest IDs를 추출하여 저장
+            # quest IDs를 추출하여 저장
             quest_ids = [q.get("id") for q in recommended_quests]
 
             db.table("chat_logs").insert({
@@ -1096,15 +1096,15 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 "title": theme,  # ex: Events, Food, Culture 등
                 "is_read_only": True,  # 보기 전용
 
-                # 🔥 신규 필드 저장
+                # 신규 필드 저장
                 "quest_step": 99,  # 최종 결과 단계
                 "prompt_step_text": "AI가 추천한 여행 코스 결과입니다!",
-                "options": {"quest_ids": quest_ids},  # 🔥 quest IDs 저장
+                "options": {"quest_ids": quest_ids},
                 "selected_theme": theme,
                 "selected_districts": request.preferences.get("districts"),
                 "include_cart": request.preferences.get("include_cart", False)
             }).execute()
-            logger.info(f"✅ Route recommend chat log saved (session: {session_id}, quest_ids: {quest_ids})")
+            logger.info(f"Route recommend chat log saved (session: {session_id}, quest_ids: {quest_ids})")
         except Exception as db_error:
             logger.warning(f"Failed to save chat log: {db_error}")
         

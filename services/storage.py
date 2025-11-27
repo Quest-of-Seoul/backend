@@ -102,7 +102,7 @@ def compress_and_upload_image(
             }
         )
         
-        # 🔥 절대경로로 강제 URL 생성 (Supabase get_public_url 대신)
+        # 절대경로로 강제 URL 생성 (Supabase get_public_url 대신)
         SUPABASE_URL = os.getenv("SUPABASE_URL")
         if not SUPABASE_URL:
             logger.error("SUPABASE_URL not set in environment")

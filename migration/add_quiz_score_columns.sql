@@ -21,6 +21,3 @@ COMMENT ON COLUMN user_quest_progress.score IS 'Total quiz score (max 100 points
 COMMENT ON COLUMN user_quest_progress.correct_count IS 'Number of correct answers';
 COMMENT ON COLUMN user_quest_progress.used_hint IS 'Whether hint was used in current question';
 COMMENT ON COLUMN user_quest_progress.current_quiz IS 'Current quiz number (0-4 for 5 questions)';
-
-
-
