@@ -29,9 +29,9 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
             "문화관광 > 기타문화관광지"
         ],
         "include_paths_en": [
-            "Culture > landmarks",
+            "Culture > Landmarks",
             "Culture > Theme Parks",
-            "Culture > Others Cultural Facilities"
+            "Culture > Cultural Facilities > Others Cultural Facilities"
         ],
         "include_keywords": ["랜드마크", "테마공원"],
         "include_keywords_en": ["Landmark", "Theme Park", "Attraction", "Hot Spot"],
@@ -45,10 +45,12 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
             "역사관광"
         ],
         "include_paths_en": [
-            "History"
+            "History",
+            "History > Historical Sites",
+            "History > Religious Sites"
         ],
         "include_keywords": ["역사관광", "역사", "유적", "궁", "전통"],
-        "include_keywords_en": ["History", "Historic", "Heritage", "Palace", "Traditional"],
+        "include_keywords_en": ["History", "Historic", "Heritage", "Palace", "Traditional", "Historical Sites", "Religious Sites"],
         "exclude_keywords": [],
         "exclude_keywords_en": []
     },
@@ -65,9 +67,9 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
         "include_paths_en": [
             "Culture > Convention Centers",
             "Culture > Cultural Facilities",
-            "Culture > Art Museums/Galleries",
-            "Culture > Museums",
-            "Festivals/Events/Performances > Exhibitions"
+            "Culture > Cultural Facilities > Art Museums/Galleries",
+            "Culture > Cultural Facilities > Museums",
+            "Festivals/Events/Performances > Events > Exhibitions"
         ],
         "include_keywords": ["전시", "미술관", "박물관"],
         "include_keywords_en": ["Museum", "Gallery", "Exhibition", "Art Gallery", "Art Museum"],
@@ -83,10 +85,13 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
         ],
         "include_paths_en": [
             "Nature",
+            "Nature > Natural Sites(Mountains)",
+            "Nature > Natural Sites(Parks)",
+            "Nature > Natural Sites(Rivers)",
             "Culture > Parks"
         ],
         "include_keywords": ["자연", "공원"],
-        "include_keywords_en": ["Nature", "Park", "Urban Park", "Natural"],
+        "include_keywords_en": ["Nature", "Park", "Urban Park", "Natural", "Mountain", "River"],
         "exclude_keywords": [],
         "exclude_keywords_en": []
     },
@@ -98,7 +103,7 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
         "include_keywords": ["음식", "맛집"],
         "include_keywords_en": ["Food", "Restaurant", "Dining"],
         "exclude_keywords": ["카페", "찻집", "주점", "티하우스"],
-        "exclude_keywords_en": ["Cafe", "Coffee", "Bar", "Tea House", "Cafes & Tea Shops", "Bars & Clums"]
+        "exclude_keywords_en": ["Cafe", "Coffee", "Bar", "Tea House", "Cafes & Tea Shops", "Bars & Clubs"]
     },
     "Drinks": {
         "description": "카페·티하우스·바(주점)",
@@ -109,7 +114,7 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
         ],
         "include_paths_en": [
             "Cuisine > Cafes & Tea Shops",
-            "Cuisine > Bars & Clums"
+            "Cuisine > Bars & Clubs"
         ],
         "include_keywords": ["카페", "찻집", "주점", "티하우스"],
         "include_keywords_en": ["Cafe", "Coffee", "Bar", "Tea House", "Beverage"],
@@ -123,10 +128,16 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
             "쇼핑"
         ],
         "include_paths_en": [
-            "Shopping"
+            "Shopping",
+            "Shopping > Department Stores",
+            "Shopping > Duty Free Shops",
+            "Shopping > Shopping Malls & Outlets",
+            "Shopping > Specialty Shops & Stores",
+            "Shopping > Supermarkets & Warehouses",
+            "Shopping > Traditional Markets"
         ],
         "include_keywords": ["쇼핑", "시장", "마켓"],
-        "include_keywords_en": ["Shopping", "Market", "Store", "Shopping Mall"],
+        "include_keywords_en": ["Shopping", "Market", "Store", "Shopping Mall", "Department Store", "Duty Free", "Traditional Market"],
         "exclude_keywords": [],
         "exclude_keywords_en": []
     },
@@ -139,10 +150,16 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
         ],
         "include_paths_en": [
             "Experience Programs",
-            "Culture > Leisure/Sports Center"
+            "Experience Programs > Craft Workshops",
+            "Experience Programs > Industrial Sites",
+            "Experience Programs > Other Experiences",
+            "Experience Programs > Temple Stays",
+            "Experience Programs > Traditional Experience",
+            "Experience Programs > Wellness",
+            "Culture > Leisure/Sports Centers"
         ],
         "include_keywords": ["체험", "레저", "스포츠"],
-        "include_keywords_en": ["Experience", "Leisure", "Sports", "Activity", "Adventure"],
+        "include_keywords_en": ["Experience", "Leisure", "Sports", "Activity", "Adventure", "Workshop", "Temple Stay", "Wellness"],
         "exclude_keywords": [],
         "exclude_keywords_en": []
     },
@@ -158,10 +175,10 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
         ],
         "include_paths_en": [
             "Festivals/Events/Performances > Festivals",
-            "Festivals/Events/Performances > Performance",
-            "Festivals/Events/Performances > Event",
-            "Festivals/Events/Performances > Other Events",
-            "Festivals/Events/Performances > Expos"
+            "Festivals/Events/Performances > Performances",
+            "Festivals/Events/Performances > Events",
+            "Festivals/Events/Performances > Events > Other Events",
+            "Festivals/Events/Performances > Events > Expos"
         ],
         "include_keywords": ["축제", "공연", "행사", "박람회"],
         "include_keywords_en": ["Festival", "Performance", "Event", "Show", "Fair"],
