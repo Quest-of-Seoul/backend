@@ -22,7 +22,6 @@ def normalize_category_path(path: Optional[str]) -> str:
 CATEGORY_DATASET_INFO: Dict[str, Dict] = {
     "Attractions": {
         "description": "도시의 대표 관광명소(랜드마크·테마파크·핫플 등)",
-        "total_count": 92,
         "include_paths": [
             "문화관광 > 랜드마크관광",
             "문화관광 > 테마공원",
@@ -40,7 +39,6 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
     },
     "History": {
         "description": "역사·유적지·궁·전통 공간",
-        "total_count": 649,
         "include_paths": [
             "역사관광"
         ],
@@ -56,7 +54,6 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
     },
     "Culture": {
         "description": "박물관·미술관·전시·공연 등 문화시설",
-        "total_count": 599,
         "include_paths": [
             "문화관광 > 전시시설",
             "문화관광 > 기타전시시설",
@@ -78,7 +75,6 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
     },
     "Nature": {
         "description": "공원·산·강·자연풍경",
-        "total_count": 136,
         "include_paths": [
             "자연관광",
             "문화관광 > 도시공원"
@@ -97,7 +93,6 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
     },
     "Food": {
         "description": "식당·길거리음식·현지 맛집 (카페/주점 제외)",
-        "total_count": 1004,
         "include_prefixes": ["음식"],
         "include_prefixes_en": ["Cuisine"],
         "include_keywords": ["음식", "맛집"],
@@ -107,7 +102,6 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
     },
     "Drinks": {
         "description": "카페·티하우스·바(주점)",
-        "total_count": 247,
         "include_paths": [
             "음식 > 카페/찻집",
             "음식 > 주점"
@@ -123,7 +117,6 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
     },
     "Shopping": {
         "description": "쇼핑·시장·상점가",
-        "total_count": 269,
         "include_paths": [
             "쇼핑"
         ],
@@ -143,7 +136,6 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
     },
     "Activities": {
         "description": "체험·클래스·액티비티",
-        "total_count": 368,
         "include_paths": [
             "체험관광",
             "문화관광 > 레저스포츠시설"
@@ -165,7 +157,6 @@ CATEGORY_DATASET_INFO: Dict[str, Dict] = {
     },
     "Events": {
         "description": "축제·공연·행사",
-        "total_count": 183,
         "include_paths": [
             "축제/공연/행사 > 축제",
             "축제/공연/행사 > 공연",
@@ -865,9 +856,6 @@ def collect_all_places_by_category(
         )
         
         if not places or len(places) < page_size:
-            break
-        
-        if total_count is not None and len(all_places) >= total_count:
             break
         
         page_no += 1

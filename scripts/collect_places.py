@@ -31,22 +31,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-CATEGORY_TARGET_COUNTS: Dict[str, Optional[int]] = {
-    cat: info.get("total_count")
-    for cat, info in CATEGORY_DATASET_INFO.items()
-}
-
-
 def determine_target_count(category: str, requested_max: Optional[int]) -> Optional[int]:
     """
-    CLI 입력과 사전 정의된 표 데이터를 고려해 목표 수집 개수를 계산
+    CLI 입력을 고려해 목표 수집 개수를 계산
     """
     if requested_max is not None:
         if requested_max <= 0:
             return None
         return requested_max
     
-    return CATEGORY_TARGET_COUNTS.get(category)
+    return None  # 기본값: 제한 없음
 
 
 def normalize_cid(item: Dict) -> Optional[str]:
