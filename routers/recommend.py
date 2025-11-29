@@ -110,7 +110,7 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
             latitude=request.latitude,
             longitude=request.longitude,
             radius_km=request.radius_km,
-            match_threshold=0.65,
+            match_threshold=0.3,
             match_count=request.limit,
             quest_only=request.quest_only
         )
@@ -128,23 +128,32 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
             
             # 해당 Place에 연결된 Quest 찾기
             quest_result = db.table("quests").select("*").eq("place_id", place_id).eq("is_active", True).limit(1).execute()
-            
+
+            logger.info(f"Place {place_id} ({place.get('name')}): Found {len(quest_result.data) if quest_result.data else 0} quests")
+
             recommendation_item = {
                 "place_id": place_id,
                 "similarity": result.get("similarity", 0.0),
                 "place": place
             }
-            
+
             # Quest 정보 추가
             if quest_result.data and len(quest_result.data) > 0:
                 quest = quest_result.data[0]
-                recommendation_item["quest_id"] = quest.get("id")
+                quest_id = quest.get("id")
+                recommendation_item["quest_id"] = quest_id
                 recommendation_item["name"] = quest.get("name") or place.get("name")
                 recommendation_item["description"] = quest.get("description") or place.get("description")
                 recommendation_item["category"] = quest.get("category") or place.get("category")
                 recommendation_item["latitude"] = float(quest.get("latitude")) if quest.get("latitude") else None
                 recommendation_item["longitude"] = float(quest.get("longitude")) if quest.get("longitude") else None
                 recommendation_item["reward_point"] = quest.get("reward_point")
+
+                logger.info(f"✓ Matched: Place '{place.get('name')}' → Quest ID {quest_id} '{quest.get('name')}'")
+
+                # 검증: quest의 place_id가 실제로 일치하는지 확인
+                if quest.get("place_id") != place_id:
+                    logger.warning(f"⚠ Mismatch! Quest {quest_id} has place_id={quest.get('place_id')}, but we searched for {place_id}")
                 
                 # 거리 계산
                 if request.latitude and request.longitude and recommendation_item.get("latitude") and recommendation_item.get("longitude"):
@@ -172,7 +181,12 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
             # Place 정보에서 추가 필드
             recommendation_item["district"] = place.get("district")
             recommendation_item["place_image_url"] = place.get("image_url")
-            
+
+            # quest_only가 True인데 quest가 없으면 건너뛰기
+            if request.quest_only and not recommendation_item.get("quest_id"):
+                logger.info(f"Skipping {place.get('name')} - no quest found (quest_only=True)")
+                continue
+
             formatted_recommendations.append(recommendation_item)
         
         logger.info(f"Found {len(formatted_recommendations)} recommendations")

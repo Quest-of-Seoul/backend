@@ -20,23 +20,31 @@ def search_with_gps_filter(
 ) -> List[Dict]:
     """Search with GPS filtering and vector similarity"""
     try:
+        logger.info(f"search_with_gps_filter called: lat={latitude}, lon={longitude}, radius={radius_km}, quest_only={quest_only}")
+
         if latitude and longitude:
             logger.info(f"GPS filtering: {radius_km}km radius")
-            
+
             nearby_places = search_places_by_radius(
                 latitude=latitude,
                 longitude=longitude,
                 radius_km=radius_km,
                 limit_count=100
             )
-            
+            logger.info(f"search_places_by_radius returned {len(nearby_places) if nearby_places else 0} places")
+
             if not nearby_places:
-                logger.warning("No nearby places found")
-                return []
-            
+                logger.warning("No nearby places found within radius, falling back to full search")
+                # GPS 필터링 실패 시 전체 검색으로 fallback
+                return search_similar_pinecone(
+                    embedding=embedding,
+                    match_threshold=match_threshold,
+                    match_count=match_count
+                )
+
             nearby_place_ids = [p['id'] for p in nearby_places]
             logger.info(f"Found {len(nearby_place_ids)} nearby places")
-            
+
             if quest_only:
                 db = get_db()
                 quest_result = db.table("quests") \
@@ -44,34 +52,85 @@ def search_with_gps_filter(
                     .eq("is_active", True) \
                     .in_("place_id", nearby_place_ids) \
                     .execute()
-                
+
                 quest_place_ids = [q['place_id'] for q in quest_result.data]
                 logger.info(f"Filtered to {len(quest_place_ids)} quest places")
-                
+
                 if not quest_place_ids:
-                    logger.warning("No quest places nearby")
-                    return []
-                
+                    logger.warning("No quest places nearby, falling back to all quests")
+                    # Quest 필터링 실패 시 전체 quest 검색으로 fallback
+                    db = get_db()
+                    all_quest_result = db.table("quests") \
+                        .select("place_id") \
+                        .eq("is_active", True) \
+                        .execute()
+                    all_quest_place_ids = [q['place_id'] for q in all_quest_result.data]
+
+                    results = search_similar_pinecone(
+                        embedding=embedding,
+                        match_threshold=match_threshold,
+                        match_count=match_count * 3
+                    )
+
+                    filtered_results = [
+                        r for r in results
+                        if r.get('place', {}).get('id') in all_quest_place_ids
+                    ][:match_count]
+
+                    logger.info(f"Final results (fallback): {len(filtered_results)}")
+                    return filtered_results
+
                 filter_ids = quest_place_ids
             else:
                 filter_ids = nearby_place_ids
-            
+
             logger.info(f"Vector search with {len(filter_ids)} candidates")
-            
+
             results = search_similar_pinecone(
                 embedding=embedding,
                 match_threshold=match_threshold,
                 match_count=match_count * 3
             )
-            
+            logger.info(f"Pinecone returned {len(results)} results")
+
+            # 디버깅: 첫 몇 개 결과의 place_id 확인
+            if results:
+                sample_ids = [r.get('place', {}).get('id') for r in results[:3]]
+                logger.info(f"Sample result place_ids: {sample_ids}")
+                logger.info(f"Filter has {len(filter_ids)} ids, first few: {filter_ids[:5] if len(filter_ids) > 0 else []}")
+
             filtered_results = [
                 r for r in results
                 if r.get('place', {}).get('id') in filter_ids
             ][:match_count]
-            
-            logger.info(f"Final results: {len(filtered_results)}")
+
+            logger.info(f"Final results after filtering: {len(filtered_results)}")
+
+            # GPS 필터링 후 결과가 없으면 GPS 무시하고 전체에서 검색
+            if len(filtered_results) == 0:
+                logger.warning("No results after GPS filtering, searching without GPS filter")
+                if quest_only:
+                    # Quest만 검색
+                    db = get_db()
+                    all_quest_result = db.table("quests") \
+                        .select("place_id") \
+                        .eq("is_active", True) \
+                        .execute()
+                    all_quest_place_ids = [q['place_id'] for q in all_quest_result.data]
+
+                    unfiltered_results = [
+                        r for r in results
+                        if r.get('place', {}).get('id') in all_quest_place_ids
+                    ][:match_count]
+                    logger.info(f"Results without GPS filter (quest only): {len(unfiltered_results)}")
+                    return unfiltered_results
+                else:
+                    # 모든 place 검색
+                    logger.info(f"Results without GPS filter (all places): {len(results[:match_count])}")
+                    return results[:match_count]
+
             return filtered_results
-        
+
         else:
             logger.info("Full vector search")
             return search_similar_pinecone(
