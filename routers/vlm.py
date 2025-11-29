@@ -35,7 +35,7 @@ class VLMAnalyzeRequest(BaseModel):
     image: str
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    language: str = "ko"
+    language: str = "en"
     prefer_url: bool = True
     enable_tts: bool = True
     use_cache: bool = True
@@ -86,33 +86,59 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
             )
             logger.info(f"Found {len(nearby_places)} nearby places")
         
+        # Multi-modal search: image embedding + GPS + text matching
         embedding = generate_image_embedding(image_bytes)
         if not embedding:
             logger.warning("Embedding generation failed")
         
         similar_images = []
         best_similarity = 0.0
+        matched_place_from_vector = None
+        
         if embedding:
             from services.optimized_search import search_with_gps_filter
             
+            # Image vector search
             similar_images = search_with_gps_filter(
                 embedding=embedding,
                 latitude=request.latitude,
                 longitude=request.longitude,
                 radius_km=5.0,
                 match_threshold=0.6,
-                match_count=3,
+                match_count=5,  # Collect more candidates
                 quest_only=False
             )
             
             if similar_images:
                 best_similarity = similar_images[0].get("similarity", 0.0)
+                matched_place_from_vector = similar_images[0].get("place")
                 logger.info(f"Found {len(similar_images)} similar images (best: {best_similarity:.2f})")
+        
+        # VLM analysis (with multi-modal information)
+        # Prioritize vector search results in nearby_places
+        enhanced_nearby_places = []
+        
+        # Add places found by vector search with priority
+        if matched_place_from_vector:
+            enhanced_nearby_places.append({
+                "id": matched_place_from_vector.get("id"),
+                "name": matched_place_from_vector.get("name"),
+                "category": matched_place_from_vector.get("category"),
+                "distance_km": 0.0,  # Vector matching has no distance info
+                "source": "vector_search"
+            })
+        
+        # Add GPS-based nearby places
+        for np in nearby_places:
+            # Remove duplicates
+            if not any(ep.get("id") == np.get("id") for ep in enhanced_nearby_places):
+                enhanced_nearby_places.append(np)
         
         vlm_response = analyze_place_image(
             image_bytes=image_bytes,
-            nearby_places=nearby_places,
-            language=request.language
+            nearby_places=enhanced_nearby_places,
+            language="en",
+            quest_context=None  # No quest context for general VLM analysis
         )
         
         if not vlm_response:
@@ -126,16 +152,35 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
         matched_place = None
         matched_place_id = None
         
-        if place_info.get("place_name"):
+        # Multi-modal matching: VLM + vector search + GPS integration
+        # Priority 1: Vector search results (high image similarity)
+        if matched_place_from_vector:
+            matched_place = matched_place_from_vector
+            matched_place_id = matched_place.get("id")
+            logger.info(f"Matched place from vector search: {matched_place.get('name')}")
+        
+        # Priority 2: Search by place name extracted by VLM
+        elif place_info.get("place_name"):
             matched_place = get_place_by_name(place_info["place_name"], fuzzy=True)
-            
-            if not matched_place and similar_images:
-                matched_place = similar_images[0].get("place")
-            
             if matched_place:
                 matched_place_id = matched_place.get("id")
-                logger.info(f"Matched place: {matched_place.get('name')}")
-                increment_place_view_count(matched_place_id)
+                logger.info(f"Matched place from VLM: {matched_place.get('name')}")
+        
+        # Priority 3: Vector search results (if VLM matching failed)
+        if not matched_place and similar_images:
+            matched_place = similar_images[0].get("place")
+            if matched_place:
+                matched_place_id = matched_place.get("id")
+                logger.info(f"Matched place from vector fallback: {matched_place.get('name')}")
+        
+        # Priority 4: First GPS-based nearby place (if matching failed)
+        if not matched_place and nearby_places:
+            matched_place = nearby_places[0]
+            matched_place_id = matched_place.get("id")
+            logger.info(f"Matched place from GPS: {matched_place.get('name')}")
+        
+        if matched_place and matched_place_id:
+            increment_place_view_count(matched_place_id)
         
         gps_distance = None
         if matched_place and request.latitude and request.longitude:
@@ -155,22 +200,22 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
         
         if matched_place:
             enhancement_prompt = f"""
-VLM 분석 결과:
+VLM Analysis Result:
 {vlm_response}
 
-장소 정보:
-- 이름: {matched_place.get('name')}
-- 카테고리: {matched_place.get('category')}
-- 설명: {matched_place.get('description')}
-- 주소: {matched_place.get('address')}
+Place Information:
+- Name: {matched_place.get('name')}
+- Category: {matched_place.get('category')}
+- Description: {matched_place.get('description')}
+- Address: {matched_place.get('address')}
 
-위 정보를 바탕으로 AR 도슨트처럼 친근하고 흥미롭게 3-4문장으로 이 장소를 소개해주세요.
+Based on the above information, please introduce this place in a friendly and engaging way in 3-4 sentences, like an AR docent.
 """
             try:
                 final_description = generate_docent_message(
-                    landmark=matched_place.get('name', '이 장소'),
-                    user_message=enhancement_prompt if request.language == "ko" else None,
-                    language=request.language
+                    landmark=matched_place.get('name', 'This place'),
+                    user_message=enhancement_prompt,
+                    language="en"
                 )
                 logger.info("Description enhanced by Gemini")
             except Exception as e:
@@ -181,7 +226,7 @@ VLM 분석 결과:
         
         if request.enable_tts:
             try:
-                language_code = f"{request.language}-KR" if request.language == "ko" else "en-US"
+                language_code = "en-US"
                 
                 if request.prefer_url:
                     audio_url, audio_base64 = text_to_speech_url(
@@ -259,7 +304,7 @@ async def analyze_image_multipart(
     image: UploadFile = File(...),
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
-    language: str = Form("ko"),
+    language: str = Form("en"),
     prefer_url: bool = Form(False),
     enable_tts: bool = Form(True),
     user_id: str = Depends(get_current_user_id)
@@ -429,3 +474,4 @@ async def health_check():
         },
         "pinecone_stats": pinecone_stats if pinecone_available else None
     }
+

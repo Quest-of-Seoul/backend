@@ -1,10 +1,11 @@
-"""AI Station Router - 채팅 리스트 및 통합 기능"""
+"""AI Station Router - Chat list and integrated features"""
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import base64
 import uuid
+import os
 import logging
 from datetime import datetime
 
@@ -23,7 +24,7 @@ router = APIRouter()
 
 class ExploreRAGChatRequest(BaseModel):
     user_message: str
-    language: str = "ko"
+    language: str = "en"
     prefer_url: bool = False
     enable_tts: bool = True
     chat_session_id: Optional[str] = None
@@ -33,7 +34,7 @@ class QuestRAGChatRequest(BaseModel):
     quest_id: int
     user_message: str
     landmark: Optional[str] = None
-    language: str = "ko"
+    language: str = "en"
     prefer_url: bool = False
     enable_tts: bool = True
     chat_session_id: Optional[str] = None
@@ -43,7 +44,7 @@ class QuestVLMChatRequest(BaseModel):
     quest_id: int
     image: str  # base64
     user_message: Optional[str] = None
-    language: str = "ko"
+    language: str = "en"
     prefer_url: bool = False
     enable_tts: bool = True
     chat_session_id: Optional[str] = None
@@ -51,25 +52,25 @@ class QuestVLMChatRequest(BaseModel):
 
 class STTTTSRequest(BaseModel):
     audio: str  # base64 encoded audio
-    language_code: str = "ko-KR"
+    language_code: str = "en-US"
     prefer_url: bool = False
 
 
 class RouteRecommendRequest(BaseModel):
-    preferences: dict  # 사용자 취향 정보
+    preferences: dict  # User preference information
     must_visit_place_id: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
 
 def format_time_ago(created_at_str: str) -> str:
-    """시간을 '몇분전' 또는 '몇월 며칠' 형식으로 변환"""
+    """Convert time to 'X minutes ago' or 'MM/DD' format"""
     try:
         from datetime import datetime, timezone, timedelta
         
-        # 문자열을 datetime으로 변환
+        # Convert string to datetime
         if isinstance(created_at_str, str):
-            # ISO 형식 문자열 파싱
+            # Parse ISO format string
             if 'T' in created_at_str:
                 dt_str = created_at_str.replace('Z', '+00:00')
                 if '+' in dt_str or dt_str.endswith('+00:00'):
@@ -85,27 +86,27 @@ def format_time_ago(created_at_str: str) -> str:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
         
-        # UTC를 KST로 변환 (UTC+9)
+        # Convert UTC to KST (UTC+9)
         kst_offset = timedelta(hours=9)
         dt_kst = dt.astimezone(timezone(kst_offset))
         
         now = datetime.now(timezone(kst_offset))
         diff = now - dt_kst
         
-        # 몇분전
-        if diff.total_seconds() < 3600:  # 1시간 미만
+        # Minutes ago
+        if diff.total_seconds() < 3600:  # Less than 1 hour
             minutes = int(diff.total_seconds() / 60)
             if minutes < 1:
-                return "방금"
-            return f"{minutes}분전"
+                return "Just now"
+            return f"{minutes} minutes ago"
         
-        # 몇시간전
-        if diff.total_seconds() < 86400:  # 24시간 미만
+        # Hours ago
+        if diff.total_seconds() < 86400:  # Less than 24 hours
             hours = int(diff.total_seconds() / 3600)
-            return f"{hours}시간전"
+            return f"{hours} hours ago"
         
-        # 몇월 며칠
-        return dt_kst.strftime("%m월 %d일")
+        # Month and day
+        return dt_kst.strftime("%m/%d")
     
     except Exception as e:
         logger.warning(f"Time formatting error: {e}")
@@ -132,20 +133,20 @@ def build_quest_context_block(quest: Dict[str, Any]) -> str:
     """Build structured context text for LLM prompts."""
     place = quest.get("place") or {}
     lines = [
-        f"퀘스트 장소: {quest.get('name') or place.get('name', '')}",
+        f"Quest Place: {quest.get('name') or place.get('name', '')}",
     ]
     if place.get("address"):
-        lines.append(f"주소: {place['address']}")
+        lines.append(f"Address: {place['address']}")
     if place.get("district"):
-        lines.append(f"행정구역: {place['district']}")
+        lines.append(f"District: {place['district']}")
     if place.get("category") or quest.get("category"):
-        lines.append(f"카테고리: {quest.get('category') or place.get('category')}")
+        lines.append(f"Category: {quest.get('category') or place.get('category')}")
     if quest.get("reward_point"):
-        lines.append(f"획득 포인트: {quest['reward_point']}점")
+        lines.append(f"Reward Points: {quest['reward_point']} points")
     if quest.get("description"):
-        lines.append(f"장소 설명: {quest['description']}")
+        lines.append(f"Place Description: {quest['description']}")
     elif place.get("description"):
-        lines.append(f"장소 설명: {place['description']}")
+        lines.append(f"Place Description: {place['description']}")
     return "\n".join(lines)
 
 
@@ -157,7 +158,7 @@ async def get_chat_list(
     user_id: str = Depends(get_current_user_id)
 ):
     """
-    채팅 리스트 조회
+    Get chat list
     - mode: explore | quest
     - function_type:
         rag_chat, vlm_chat, route_recommend
@@ -165,41 +166,41 @@ async def get_chat_list(
     try:
         db = get_db()
 
-        # 기본 query
+        # Base query
         query = db.table("chat_logs").select("*").eq("user_id", user_id)
 
-        # mode + function_type 조합 필터링
+        # Filter by mode + function_type combination
         if mode and function_type:
-            # 둘 다 지정된 경우 정확히 필터
+            # Filter exactly when both are specified
             query = query.eq("mode", mode).eq("function_type", function_type)
 
         elif mode:
             query = query.eq("mode", mode)
 
-            # mode에 따른 function_type 제한
+            # Limit function_type based on mode
             if mode == "quest":
-                # quest 모드에서는 rag_chat + vlm_chat만
+                # In quest mode, only rag_chat + vlm_chat
                 query = query.in_("function_type", ["rag_chat", "vlm_chat"])
             elif mode == "explore":
-                # explore는 rag_chat + route
+                # In explore mode, rag_chat + route
                 query = query.in_("function_type", ["rag_chat", "route_recommend"])
 
         elif function_type:
-            # function_type만 지정된 경우
+            # Only function_type specified
             query = query.eq("function_type", function_type)
 
-            # route_recommend는 explore 모드만 존재
+            # route_recommend only exists in explore mode
             if function_type == "route_recommend":
                 query = query.eq("mode", "explore")
 
         else:
-            # 기본값: explore + rag_chat
+            # Default: explore + rag_chat
             query = query.eq("mode", "explore").eq("function_type", "rag_chat")
 
-        # 결과 가져오기
+        # Get results
         result = query.order("created_at", desc=True).limit(limit * 10).execute()
 
-        # 세션 그룹화
+        # Group by session
         sessions = {}
         vlm_count = 0
         rag_count = 0
@@ -215,7 +216,7 @@ async def get_chat_list(
             if not session_id:
                 continue
 
-            # 새 세션 생성
+            # Create new session
             if session_id not in sessions:
                 title = chat.get("title") or (chat.get("user_message") or "")[:50]
 
@@ -231,7 +232,7 @@ async def get_chat_list(
                     "chats": []
                 }
 
-            # 세션에 메시지 추가
+            # Add message to session
             sessions[session_id]["chats"].append({
                 "id": chat.get("id"),
                 "user_message": chat.get("user_message"),
@@ -246,12 +247,12 @@ async def get_chat_list(
                 "created_at": chat.get("created_at"),
             })
 
-            # 최신순 업데이트
+            # Update to latest
             if chat.get("created_at") > sessions[session_id]["updated_at"]:
                 sessions[session_id]["updated_at"] = chat.get("created_at")
                 sessions[session_id]["time_ago"] = format_time_ago(chat.get("created_at"))
 
-        # 정렬
+        # Sort
         session_list = sorted(
             sessions.values(),
             key=lambda x: x["updated_at"],
@@ -272,8 +273,8 @@ async def get_chat_list(
 @router.get("/chat-session/{session_id}")
 async def get_chat_session(session_id: str, user_id: str = Depends(get_current_user_id)):
     """
-    특정 세션의 채팅 내역 조회
-    사용자가 히스토리에서 세션을 클릭했을 때 전체 대화 내용을 반환
+    Get chat history for a specific session
+    Returns full conversation when user clicks a session from history
     """
     try:
         db = get_db()
@@ -283,7 +284,7 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
         if not result.data:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        # 세션 정보
+        # Session information
         first_chat = result.data[0]
         session_info = {
             "session_id": session_id,
@@ -294,7 +295,7 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
             "created_at": first_chat.get("created_at")
         }
         
-        # 채팅 목록
+        # Chat list
         chats = []
         for chat in result.data:
             chat_data = {
@@ -305,7 +306,7 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
                 "created_at": chat.get("created_at")
             }
             
-            # Plan Chat 전용 필드 추가
+            # Add Plan Chat specific fields
             if chat.get("function_type") == "route_recommend":
                 chat_data.update({
                     "title": chat.get("title"),
@@ -338,53 +339,128 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
 @router.post("/explore/rag-chat")
 async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depends(get_current_user_id)):
     """
-    탐색 모드 - 일반 RAG 채팅 (텍스트만 저장)
-    Pinecone에 저장된 장소 description을 RAG로 검색하여 답변 생성
+    Explore mode - General RAG chat (text only storage)
+    Generate responses by vector searching place text embeddings stored in Pinecone
     """
     try:
         logger.info(f"Explore RAG chat: {user_id}")
         
-        # 세션 ID 생성 또는 기존 사용
+        # Generate or use existing session ID
         session_id = request.chat_session_id
         if not session_id:
             session_id = str(uuid.uuid4())
         
-        # 사용자 메시지를 임베딩하여 유사한 장소 검색
+        # Generate embedding from user message and search for similar places
         text_embedding = generate_text_embedding(request.user_message)
         
-        # Pinecone에서 유사한 장소 검색 (description 기반)
-        # TODO: Pinecone에 place description 임베딩이 저장되어 있어야 함
-        # 현재는 DB에서 직접 검색하는 방식으로 구현
-        db = get_db()
+        if not text_embedding:
+            logger.warning("Failed to generate text embedding, falling back to DB search")
+            # Fallback: DB text search
+            db = get_db()
+            places_result = db.rpc(
+                "search_places_by_rag_text",
+                {
+                    "search_query": request.user_message,
+                    "limit_count": 3
+                }
+            ).execute()
+            
+            context = ""
+            if places_result.data:
+                place_names = [p.get("name", "") for p in places_result.data[:3]]
+                context = f"관련 장소: {', '.join(place_names)}\n\n"
+        else:
+            # Pinecone vector search
+            from services.pinecone_store import search_text_embeddings
+            
+            similar_places = search_text_embeddings(
+                text_embedding=text_embedding,
+                match_threshold=0.65,
+                match_count=5
+            )
+            
+            # Build context
+            context_parts = []
+            if similar_places:
+                context_parts.append("Related Places Information:")
+                for idx, sp in enumerate(similar_places[:3], 1):
+                    place = sp.get("place")
+                    if place:
+                        place_info = []
+                        if place.get("name"):
+                            place_info.append(f"Name: {place['name']}")
+                        if place.get("category"):
+                            place_info.append(f"Category: {place['category']}")
+                        if place.get("address"):
+                            place_info.append(f"Address: {place['address']}")
+                        if place.get("description"):
+                            desc = place['description'][:200] + "..." if len(place['description']) > 200 else place['description']
+                            place_info.append(f"Description: {desc}")
+                        
+                        context_parts.append(f"\n{idx}. {' | '.join(place_info)}")
+                
+                context_parts.append("")
+                context = "\n".join(context_parts)
+            else:
+                # Fallback to DB search if vector search fails
+                db = get_db()
+                places_result = db.rpc(
+                    "search_places_by_rag_text",
+                    {
+                        "search_query": request.user_message,
+                        "limit_count": 3
+                    }
+                ).execute()
+                
+                if places_result.data:
+                    place_names = [p.get("name", "") for p in places_result.data[:3]]
+                    context = f"Related Places: {', '.join(place_names)}\n\n"
+                else:
+                    context = ""
         
-        # RAG 검색: places 테이블의 metadata->>'rag_text'에서 검색
-        places_result = db.rpc(
-            "search_places_by_rag_text",
-            {
-                "search_query": request.user_message,
-                "limit_count": 3
-            }
-        ).execute()
+        # Get previous conversation history (multi-turn conversation support)
+        chat_history = ""
+        if session_id:
+            try:
+                db = get_db()
+                history_result = db.table("chat_logs") \
+                    .select("user_message, ai_response") \
+                    .eq("chat_session_id", session_id) \
+                    .eq("user_id", user_id) \
+                    .order("created_at", desc=True) \
+                    .limit(3) \
+                    .execute()
+                
+                if history_result.data and len(history_result.data) > 0:
+                    history_parts = ["Previous Conversation:"]
+                    for chat in reversed(history_result.data):  # Sort chronologically
+                        if chat.get("user_message"):
+                            history_parts.append(f"User: {chat['user_message']}")
+                        if chat.get("ai_response"):
+                            history_parts.append(f"AI: {chat['ai_response'][:150]}...")
+                    history_parts.append("")
+                    chat_history = "\n".join(history_parts)
+            except Exception as hist_error:
+                logger.warning(f"Failed to load chat history: {hist_error}")
         
-        context = ""
-        if places_result.data:
-            place_names = [p.get("name", "") for p in places_result.data[:3]]
-            context = f"관련 장소: {', '.join(place_names)}\n\n"
+        # Generate AI response
+        full_prompt = f"""{context}{chat_history}Question: {request.user_message}
+
+Please provide a friendly and helpful response based on the above information."""
         
-        # AI 응답 생성
         ai_response = generate_docent_message(
-            landmark="서울 여행지",
-            user_message=f"{context}질문: {request.user_message}",
-            language=request.language
+            landmark="Seoul Travel",
+            user_message=full_prompt,
+            language="en"
         )
         
-        # TTS 생성
+        # Generate TTS
         audio_url = None
         audio_base64 = None
         
         if request.enable_tts:
             try:
-                language_code = f"{request.language}-KR" if request.language == "ko" else "en-US"
+                language_code = "en-US"
                 
                 if request.prefer_url:
                     audio_url, audio_base64 = text_to_speech_url(
@@ -400,15 +476,15 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # 채팅 기록 저장 (텍스트만)
-        # 첫 번째 질문인지 확인하여 제목 설정
+        # Save chat log (text only)
+        # Check if this is the first message to set title
         try:
             existing_session = db.table("chat_logs").select("id").eq("chat_session_id", session_id).limit(1).execute()
             is_first_message = not existing_session.data or len(existing_session.data) == 0
             
             title = None
             if is_first_message:
-                title = request.user_message[:50]  # 첫 질문을 제목으로 사용
+                title = request.user_message[:50]  # Use first question as title
             
             db.table("chat_logs").insert({
                 "user_id": user_id,
@@ -444,7 +520,7 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
 @router.post("/quest/rag-chat")
 async def quest_rag_chat(request: QuestRAGChatRequest, user_id: str = Depends(get_current_user_id)):
     """
-    퀘스트 모드 - 일반 RAG 채팅 (이미지+텍스트 저장 가능)
+    Quest mode - General RAG chat (image + text storage available)
     """
     try:
         if not request.quest_id:
@@ -457,27 +533,27 @@ async def quest_rag_chat(request: QuestRAGChatRequest, user_id: str = Depends(ge
 
         session_id = request.chat_session_id or str(uuid.uuid4())
 
-        landmark = quest.get("name") or quest.get("title") or request.landmark or "퀘스트 장소"
+        landmark = quest.get("name") or quest.get("title") or request.landmark or "Quest Place"
         context_block = build_quest_context_block(quest)
-        user_prompt = f"""다음은 사용자가 진행 중인 퀘스트 장소에 대한 정보입니다:
+        user_prompt = f"""The following is information about the quest place the user is currently working on:
 {context_block}
 
-위 정보를 참고해 아래 질문에 답해주세요.
-질문: {request.user_message}"""
+Please answer the following question based on the above information.
+Question: {request.user_message}"""
         
         ai_response = generate_docent_message(
             landmark=landmark,
             user_message=user_prompt,
-            language=request.language
+            language="en"
         )
         
-        # TTS 생성
+        # Generate TTS
         audio_url = None
         audio_base64 = None
         
         if request.enable_tts:
             try:
-                language_code = f"{request.language}-KR" if request.language == "ko" else "en-US"
+                language_code = "en-US"
                 
                 if request.prefer_url:
                     audio_url, audio_base64 = text_to_speech_url(
@@ -493,7 +569,7 @@ async def quest_rag_chat(request: QuestRAGChatRequest, user_id: str = Depends(ge
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # 퀘스트 채팅도 히스토리에 저장 (조회 전용)
+        # Save quest chat to history (read-only)
         try:
             existing_session = db.table("chat_logs").select("id").eq("chat_session_id", session_id).limit(1).execute()
             is_first_message = not existing_session.data
@@ -536,7 +612,7 @@ async def quest_rag_chat(request: QuestRAGChatRequest, user_id: str = Depends(ge
 @router.post("/quest/vlm-chat")
 async def quest_vlm_chat(request: QuestVLMChatRequest, user_id: str = Depends(get_current_user_id)):
     """
-    퀘스트 모드 - VLM 채팅 (이미지+텍스트 저장)
+    Quest mode - VLM chat (image + text storage)
     """
     try:
         if not request.quest_id:
@@ -549,65 +625,66 @@ async def quest_vlm_chat(request: QuestVLMChatRequest, user_id: str = Depends(ge
         session_id = request.chat_session_id or str(uuid.uuid4())
         quest = fetch_quest_context(request.quest_id, db=db)
         
-        # 이미지 디코딩
+        # Decode image
         try:
             image_bytes = base64.b64decode(request.image)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid base64 image: {str(e)}")
         
-        # 이미지 업로드
+        # Upload image
         image_url = compress_and_upload_image(
             image_bytes=image_bytes,
             max_size=1920,
             quality=85
         )
         
-        # VLM 분석 (VLM 서비스 직접 사용)
+        # VLM analysis (using VLM service directly)
         from services.vlm import analyze_place_image, extract_place_info_from_vlm_response, calculate_confidence_score
         from services.db import search_places_by_radius, get_place_by_name, save_vlm_log
         from services.embedding import generate_image_embedding, hash_image
         from services.optimized_search import search_with_gps_filter
         
-        # 주변 장소 검색 (GPS 정보가 없으면 빈 리스트)
+        # Search nearby places (empty list if no GPS info)
         nearby_places = []
         
-        # VLM 분석
+        # VLM analysis (with quest context)
         vlm_response = analyze_place_image(
             image_bytes=image_bytes,
             nearby_places=nearby_places,
-            language=request.language
+            language="en",
+            quest_context=quest  # Include quest info in VLM prompt
         )
         
         if not vlm_response:
             raise HTTPException(status_code=503, detail="VLM service unavailable")
         
-        # 장소 정보 추출
+        # Extract place information
         place_info = extract_place_info_from_vlm_response(vlm_response)
         matched_place = None
         
         if place_info.get("place_name"):
             matched_place = get_place_by_name(place_info["place_name"], fuzzy=True)
         
-        # 최종 설명 생성
+        # Generate final description
         final_description = vlm_response
         if matched_place:
             from services.ai import generate_docent_message
             enhancement_prompt = f"""
-VLM 분석 결과:
+VLM Analysis Result:
 {vlm_response}
 
-장소 정보:
-- 이름: {matched_place.get('name')}
-- 카테고리: {matched_place.get('category')}
-- 설명: {matched_place.get('description')}
+Place Information:
+- Name: {matched_place.get('name')}
+- Category: {matched_place.get('category')}
+- Description: {matched_place.get('description')}
 
-위 정보를 바탕으로 AR 도슨트처럼 친근하고 흥미롭게 3-4문장으로 이 장소를 소개해주세요.
+Based on the above information, please introduce this place in a friendly and engaging way in 3-4 sentences, like an AR docent.
 """
             try:
                 final_description = generate_docent_message(
-                    landmark=matched_place.get('name', '이 장소'),
-                    user_message=enhancement_prompt if request.language == "ko" else None,
-                    language=request.language
+                    landmark=matched_place.get('name', 'This place'),
+                    user_message=enhancement_prompt,
+                    language="en"
                 )
             except Exception as e:
                 logger.warning(f"Description enhancement failed: {e}")
@@ -616,16 +693,16 @@ VLM 분석 결과:
         quest_context = build_quest_context_block(quest)
         ai_response = f"""{ai_response}
 
-현재 진행 중인 퀘스트 참고 정보:
+Current Quest Reference Information:
 {quest_context}"""
         
-        # TTS 생성
+        # Generate TTS
         audio_url = None
         audio_base64 = None
         
         if request.enable_tts:
             try:
-                language_code = f"{request.language}-KR" if request.language == "ko" else "en-US"
+                language_code = "en-US"
                 
                 if request.prefer_url:
                     audio_url, audio_base64 = text_to_speech_url(
@@ -641,7 +718,7 @@ VLM 분석 결과:
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # VLM 분석 로그 저장 (vlm_logs - 분석용)
+        # Save VLM analysis log (vlm_logs - for analysis)
         try:
             logger.info("Saving VLM log to vlm_logs...")
             image_hash = hash_image(image_bytes)
@@ -660,7 +737,7 @@ VLM 분석 결과:
         except Exception as vlm_log_error:
             logger.error(f"Failed to save VLM log: {vlm_log_error}", exc_info=True)
         
-        # 히스토리에 저장 (chat_logs - 채팅 히스토리용)
+        # Save to history (chat_logs - for chat history)
         try:
             logger.info(f"Saving VLM chat to chat_logs (session: {session_id})...")
             
@@ -719,13 +796,13 @@ VLM 분석 결과:
 @router.post("/stt-tts")
 async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current_user_id)):
     """
-    STT + TTS 통합 엔드포인트
-    오디오를 받아서 텍스트로 변환하고, 그 텍스트를 다시 음성으로 변환
+    STT + TTS integrated endpoint
+    Converts audio to text, then converts that text back to speech
     """
     try:
         logger.info(f"STT+TTS request: {user_id}")
         
-        # STT: 오디오를 텍스트로 변환
+        # STT: Convert audio to text
         transcribed_text = speech_to_text_from_base64(
             audio_base64=request.audio,
             language_code=request.language_code
@@ -734,7 +811,7 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
         if not transcribed_text:
             raise HTTPException(status_code=400, detail="STT transcription failed")
         
-        # TTS: 텍스트를 다시 음성으로 변환
+        # TTS: Convert text back to speech
         audio_url = None
         audio_base64 = None
         
@@ -770,8 +847,8 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
 @router.post("/route-recommend")
 async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends(get_current_user_id)):
     """
-    여행지 경로 추천
-    사전 질문을 통해 사용자 취향을 파악하고, 4개의 퀘스트를 추천
+    Travel route recommendation
+    Understand user preferences through preliminary questions and recommend 4 quests
     """
     try:
         logger.info(f"Route recommend: {user_id}")
@@ -1049,56 +1126,88 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         # 5. 종합 점수로 정렬
         scored_quests.sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
         
-        # 6. 추천 퀘스트 선택 (필수 방문 장소 포함)
-        recommended_quests = []
-        if must_visit_quest:
-            recommended_quests.append(must_visit_quest)
-            # 나머지 3개 선택
-            remaining_count = 3
-        else:
-            remaining_count = 4
+        # 6. AI 기반 추천 또는 점수 기반 추천
+        use_ai_recommendation = os.getenv("USE_AI_ROUTE_RECOMMENDATION", "true").lower() == "true"
         
-        # 상위 점수 퀘스트 선택
-        for quest in scored_quests[:remaining_count * 2]:  # 여유있게 선택
-            if len(recommended_quests) >= 4:
-                break
-
-            # 중복 제거 (같은 장소는 하나만)
-            place_id = quest.get("place_id")
-            if any(rq.get("place_id") == place_id for rq in recommended_quests):
-                continue
-
-            recommended_quests.append(quest)
-
-        # 4개로 맞추기
-        recommended_quests = recommended_quests[:4]
+        if use_ai_recommendation and len(scored_quests) >= 4:
+            # AI 기반 추천 시도
+            from services.ai import generate_route_recommendation
+            
+            ai_recommended = generate_route_recommendation(
+                candidate_quests=scored_quests[:20],  # 상위 20개 후보
+                preferences=request.preferences,
+                completed_quest_ids=completed_quest_ids,
+                language="en"
+            )
+            
+            if ai_recommended and len(ai_recommended) >= 4:
+                recommended_quests = ai_recommended[:4]
+                logger.info("Using AI-based recommendation")
+            else:
+                # AI 추천 실패 시 점수 기반으로 폴백
+                recommended_quests = []
+                if must_visit_quest:
+                    recommended_quests.append(must_visit_quest)
+                    remaining_count = 3
+                else:
+                    remaining_count = 4
+                
+                for quest in scored_quests[:remaining_count * 2]:
+                    if len(recommended_quests) >= 4:
+                        break
+                    place_id = quest.get("place_id")
+                    if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                        continue
+                    recommended_quests.append(quest)
+                
+                recommended_quests = recommended_quests[:4]
+                logger.info("Using score-based recommendation (AI fallback)")
+        else:
+            # 점수 기반 추천 (기존 방식)
+            recommended_quests = []
+            if must_visit_quest:
+                recommended_quests.append(must_visit_quest)
+                remaining_count = 3
+            else:
+                remaining_count = 4
+            
+            for quest in scored_quests[:remaining_count * 2]:
+                if len(recommended_quests) >= 4:
+                    break
+                place_id = quest.get("place_id")
+                if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                    continue
+                recommended_quests.append(quest)
+            
+            recommended_quests = recommended_quests[:4]
+            logger.info("Using score-based recommendation")
         
         # 세션 ID 생성
         session_id = str(uuid.uuid4())
         
         # 테마 추출 (preferences에서)
-        theme = request.preferences.get("theme") or request.preferences.get("category") or "서울 여행"
+        theme = request.preferences.get("theme") or request.preferences.get("category") or "Seoul Travel"
         if isinstance(theme, dict):
-            theme = theme.get("name", "서울 여행")
+            theme = theme.get("name", "Seoul Travel")
         
-        # 채팅 기록 저장 (여행 일정 - 보기 전용)
+        # Save chat log (travel itinerary - read-only)
         try:
             # quest IDs를 추출하여 저장
             quest_ids = [q.get("id") for q in recommended_quests]
 
             db.table("chat_logs").insert({
                 "user_id": user_id,
-                "user_message": f"경로 추천 요청: {request.preferences}",
-                "ai_response": f"{len(recommended_quests)}개의 퀘스트를 추천했습니다.",
+                "user_message": f"Route recommendation request: {request.preferences}",
+                "ai_response": f"Recommended {len(recommended_quests)} quests.",
                 "mode": "explore",
                 "function_type": "route_recommend",
                 "chat_session_id": session_id,
-                "title": theme,  # ex: Events, Food, Culture 등
-                "is_read_only": True,  # 보기 전용
+                "title": theme,  # ex: Events, Food, Culture etc.
+                "is_read_only": True,  # Read-only
 
-                # 신규 필드 저장
-                "quest_step": 99,  # 최종 결과 단계
-                "prompt_step_text": "AI가 추천한 여행 코스 결과입니다!",
+                # New fields
+                "quest_step": 99,  # Final result step
+                "prompt_step_text": "AI-recommended travel course results!",
                 "options": {"quest_ids": quest_ids},
                 "selected_theme": theme,
                 "selected_districts": request.preferences.get("districts"),

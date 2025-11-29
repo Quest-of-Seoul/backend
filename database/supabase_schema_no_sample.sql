@@ -147,6 +147,10 @@ CREATE TABLE IF NOT EXISTS user_quest_progress (
     status VARCHAR(20) DEFAULT 'in_progress',
     quiz_attempts INTEGER DEFAULT 0,
     quiz_correct BOOLEAN DEFAULT FALSE,
+    score INTEGER DEFAULT 0,
+    correct_count INTEGER DEFAULT 0,
+    used_hint BOOLEAN DEFAULT FALSE,
+    current_quiz INTEGER DEFAULT 0,
     completed_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, quest_id)
@@ -172,7 +176,7 @@ CREATE INDEX idx_points_created_at ON points(created_at);
 CREATE TABLE IF NOT EXISTS rewards (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    type VARCHAR(20) NOT NULL CHECK (type IN ('badge', 'coupon', 'item')),
+    type VARCHAR(20) NOT NULL CHECK (type IN ('badge', 'coupon', 'item', 'food', 'cafe', 'shopping', 'ticket', 'activity', 'entertainment', 'beauty', 'wellness')),
     point_cost INTEGER NOT NULL,
     description TEXT,
     image_url TEXT,
@@ -210,6 +214,12 @@ CREATE TABLE IF NOT EXISTS chat_logs (
     chat_session_id UUID,
     title TEXT,
     is_read_only BOOLEAN DEFAULT FALSE,
+    quest_step INT4,
+    options JSONB,
+    selected_districts JSONB,
+    selected_theme TEXT,
+    include_cart BOOLEAN DEFAULT FALSE,
+    prompt_step_text TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -553,6 +563,10 @@ COMMENT ON TABLE quests IS '장소 기반 퀘스트 (VLM places 연동 가능)';
 COMMENT ON TABLE quest_quizzes IS '퀘스트별 객관식 퀴즈';
 COMMENT ON TABLE user_quests IS '사용자별 퀘스트 진행 상황';
 COMMENT ON TABLE user_quest_progress IS '사용자별 퀘스트 & 퀴즈 상세 진행 상황';
+COMMENT ON COLUMN user_quest_progress.score IS 'Total quiz score (max 100 points)';
+COMMENT ON COLUMN user_quest_progress.correct_count IS 'Number of correct answers';
+COMMENT ON COLUMN user_quest_progress.used_hint IS 'Whether hint was used in current question';
+COMMENT ON COLUMN user_quest_progress.current_quiz IS 'Current quiz number (0-4 for 5 questions)';
 COMMENT ON TABLE points IS '포인트 트랜잭션 로그';
 COMMENT ON TABLE rewards IS '포인트로 교환 가능한 리워드 아이템';
 COMMENT ON TABLE user_rewards IS '사용자가 획득한 리워드 목록';

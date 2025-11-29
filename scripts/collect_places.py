@@ -31,22 +31,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-CATEGORY_TARGET_COUNTS: Dict[str, Optional[int]] = {
-    cat: info.get("total_count")
-    for cat, info in CATEGORY_DATASET_INFO.items()
-}
-
-
 def determine_target_count(category: str, requested_max: Optional[int]) -> Optional[int]:
     """
-    CLI 입력과 사전 정의된 표 데이터를 고려해 목표 수집 개수를 계산
+    CLI 입력을 고려해 목표 수집 개수를 계산
     """
     if requested_max is not None:
         if requested_max <= 0:
             return None
         return requested_max
     
-    return CATEGORY_TARGET_COUNTS.get(category)
+    return None  # 기본값: 제한 없음
 
 
 def normalize_cid(item: Dict) -> Optional[str]:
@@ -126,7 +120,7 @@ def collect_category_places(
     category: str,
     max_places: Optional[int] = None,
     area_code: str = "1",
-    delay_between_api_calls: float = 0.5,
+    delay_between_api_calls: float = 1.0,
     create_embeddings: bool = True,
     lang_code_id: str = "en"
 ) -> Dict:
@@ -313,6 +307,91 @@ def collect_category_places(
     return stats
 
 
+def collect_all_categories(
+    max_places_per_category: Optional[int] = None,
+    area_code: str = "1",
+    delay_between_api_calls: float = 1.0,
+    create_embeddings: bool = True,
+    lang_code_id: str = "en",
+    delay_between_categories: float = 2.0
+) -> Dict:
+    """
+    모든 카테고리 자동 수집
+    
+    Args:
+        max_places_per_category: 카테고리별 최대 수집 장소 수
+        area_code: 지역코드 (서울: 1)
+        delay_between_api_calls: API 호출 간 지연 시간 (초)
+        create_embeddings: 이미지 임베딩 생성 여부
+        lang_code_id: VISIT SEOUL 언어 코드
+        delay_between_categories: 카테고리 간 지연 시간 (초)
+    
+    Returns:
+        전체 수집 결과 통계
+    """
+    all_categories = list(CATEGORY_DATASET_INFO.keys())
+    logger.info(f"=== Starting collection for ALL categories ({len(all_categories)} categories) ===")
+    logger.info(f"Categories: {', '.join(all_categories)}")
+    
+    overall_stats = {
+        "total_categories": len(all_categories),
+        "categories_processed": 0,
+        "categories_succeeded": 0,
+        "categories_failed": 0,
+        "total_visit_seoul_places_collected": 0,
+        "total_places_saved": 0,
+        "total_quests_created": 0,
+        "total_embeddings_created": 0,
+        "category_stats": [],
+        "all_errors": []
+    }
+    
+    for idx, category in enumerate(all_categories, 1):
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info(f"Processing category {idx}/{len(all_categories)}: {category}")
+        logger.info("=" * 80)
+        
+        try:
+            category_stats = collect_category_places(
+                category=category,
+                max_places=max_places_per_category,
+                area_code=area_code,
+                delay_between_api_calls=delay_between_api_calls,
+                create_embeddings=create_embeddings,
+                lang_code_id=lang_code_id
+            )
+            
+            overall_stats["categories_processed"] += 1
+            if category_stats.get("places_saved", 0) > 0:
+                overall_stats["categories_succeeded"] += 1
+            else:
+                overall_stats["categories_failed"] += 1
+            
+            overall_stats["total_visit_seoul_places_collected"] += category_stats.get("visit_seoul_places_collected", 0)
+            overall_stats["total_places_saved"] += category_stats.get("places_saved", 0)
+            overall_stats["total_quests_created"] += category_stats.get("quests_created", 0)
+            overall_stats["total_embeddings_created"] += category_stats.get("embeddings_created", 0)
+            overall_stats["all_errors"].extend(category_stats.get("errors", []))
+            overall_stats["category_stats"].append(category_stats)
+            
+            logger.info(f"✓ Completed category {category}: {category_stats.get('places_saved', 0)} places saved")
+            
+        except Exception as e:
+            error_msg = f"Fatal error processing category {category}: {e}"
+            logger.error(error_msg, exc_info=True)
+            overall_stats["categories_processed"] += 1
+            overall_stats["categories_failed"] += 1
+            overall_stats["all_errors"].append(error_msg)
+        
+        # 마지막 카테고리가 아니면 대기
+        if idx < len(all_categories):
+            logger.info(f"Waiting {delay_between_categories}s before next category...")
+            time.sleep(delay_between_categories)
+    
+    return overall_stats
+
+
 def main():
     import argparse
     
@@ -320,15 +399,20 @@ def main():
     parser.add_argument(
         "--category",
         type=str,
-        required=True,
+        default=None,
         choices=["Attractions", "History", "Culture", "Nature", "Food", "Drinks", "Shopping", "Activities", "Events"],
-        help="Category to collect"
+        help="Category to collect (if not specified, all categories will be collected automatically)"
+    )
+    parser.add_argument(
+        "--all-categories",
+        action="store_true",
+        help="Collect all categories automatically (same as omitting --category)"
     )
     parser.add_argument(
         "--max-places",
         type=int,
         default=None,
-        help="Maximum number of places to collect (default: category target, <=0 means ALL)"
+        help="Maximum number of places to collect per category (default: category target, <=0 means ALL)"
     )
     parser.add_argument(
         "--area-code",
@@ -339,8 +423,8 @@ def main():
     parser.add_argument(
         "--delay",
         type=float,
-        default=0.5,
-        help="Delay between API calls in seconds (default: 0.5)"
+        default=1.0,
+        help="Delay between API calls in seconds (default: 1.0)"
     )
     parser.add_argument(
         "--lang-code",
@@ -353,52 +437,110 @@ def main():
         action="store_true",
         help="Skip image embedding creation"
     )
+    parser.add_argument(
+        "--delay-between-categories",
+        type=float,
+        default=2.0,
+        help="Delay between categories in seconds when collecting all categories (default: 2.0)"
+    )
     
     args = parser.parse_args()
+    
+    # 카테고리 지정 여부 확인
+    collect_all = args.all_categories or args.category is None
     
     logger.info("=" * 60)
     logger.info("Quest of Seoul - Place Collection Script")
     logger.info("=" * 60)
-    logger.info(f"Category: {args.category}")
-    logger.info(f"Max places: {args.max_places}")
+    if collect_all:
+        logger.info("Mode: Collecting ALL categories automatically")
+        logger.info(f"Categories to process: {', '.join(CATEGORY_DATASET_INFO.keys())}")
+    else:
+        logger.info(f"Mode: Single category collection")
+        logger.info(f"Category: {args.category}")
+    logger.info(f"Max places per category: {args.max_places if args.max_places else 'Category target'}")
     logger.info(f"Area code: {args.area_code}")
     logger.info(f"Language code: {args.lang_code}")
     logger.info(f"API call delay: {args.delay}s")
+    if collect_all:
+        logger.info(f"Delay between categories: {args.delay_between_categories}s")
     logger.info("=" * 60)
     
     if not os.getenv("VISIT_SEOUL_API_KEY"):
         logger.error("VISIT_SEOUL_API_KEY environment variable is required")
         sys.exit(1)
     
-    stats = collect_category_places(
-        category=args.category,
-        max_places=args.max_places,
-        area_code=args.area_code,
-        delay_between_api_calls=args.delay,
-        create_embeddings=not args.no_embeddings,
-        lang_code_id=args.lang_code
-    )
-    
-    logger.info("=" * 60)
-    logger.info("Collection Statistics:")
-    logger.info(f"  Category: {stats['category']}")
-    logger.info(f"  Lang code: {stats['lang_code_id']}")
-    if stats.get("expected_total"):
-        logger.info(f"  Target count: {stats['expected_total']}")
-    logger.info(f"  VISIT SEOUL places collected: {stats['visit_seoul_places_collected']}")
-    logger.info(f"  Places saved: {stats['places_saved']}")
-    logger.info(f"  Quests created: {stats['quests_created']}")
-    logger.info(f"  Embeddings created: {stats['embeddings_created']}")
-    logger.info(f"  Errors: {len(stats['errors'])}")
-    
-    if stats['errors']:
-        logger.warning("Errors occurred during collection:")
-        for error in stats['errors'][:10]:
-            logger.warning(f"  - {error}")
-        if len(stats['errors']) > 10:
-            logger.warning(f"  ... and {len(stats['errors']) - 10} more errors")
-    
-    logger.info("=" * 60)
+    if collect_all:
+        # 모든 카테고리 자동 수집
+        overall_stats = collect_all_categories(
+            max_places_per_category=args.max_places,
+            area_code=args.area_code,
+            delay_between_api_calls=args.delay,
+            create_embeddings=not args.no_embeddings,
+            lang_code_id=args.lang_code,
+            delay_between_categories=args.delay_between_categories
+        )
+        
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("FINAL COLLECTION STATISTICS (ALL CATEGORIES)")
+        logger.info("=" * 80)
+        logger.info(f"  Total categories: {overall_stats['total_categories']}")
+        logger.info(f"  Categories processed: {overall_stats['categories_processed']}")
+        logger.info(f"  Categories succeeded: {overall_stats['categories_succeeded']}")
+        logger.info(f"  Categories failed: {overall_stats['categories_failed']}")
+        logger.info(f"  Total VISIT SEOUL places collected: {overall_stats['total_visit_seoul_places_collected']}")
+        logger.info(f"  Total places saved: {overall_stats['total_places_saved']}")
+        logger.info(f"  Total quests created: {overall_stats['total_quests_created']}")
+        logger.info(f"  Total embeddings created: {overall_stats['total_embeddings_created']}")
+        logger.info(f"  Total errors: {len(overall_stats['all_errors'])}")
+        logger.info("")
+        logger.info("Category-wise breakdown:")
+        for cat_stat in overall_stats['category_stats']:
+            logger.info(f"  - {cat_stat['category']}: {cat_stat.get('places_saved', 0)} places saved, "
+                       f"{cat_stat.get('quests_created', 0)} quests, "
+                       f"{cat_stat.get('embeddings_created', 0)} embeddings")
+        
+        if overall_stats['all_errors']:
+            logger.warning("")
+            logger.warning("Errors occurred during collection:")
+            for error in overall_stats['all_errors'][:20]:
+                logger.warning(f"  - {error}")
+            if len(overall_stats['all_errors']) > 20:
+                logger.warning(f"  ... and {len(overall_stats['all_errors']) - 20} more errors")
+        
+        logger.info("=" * 80)
+    else:
+        # 단일 카테고리 수집
+        stats = collect_category_places(
+            category=args.category,
+            max_places=args.max_places,
+            area_code=args.area_code,
+            delay_between_api_calls=args.delay,
+            create_embeddings=not args.no_embeddings,
+            lang_code_id=args.lang_code
+        )
+        
+        logger.info("=" * 60)
+        logger.info("Collection Statistics:")
+        logger.info(f"  Category: {stats['category']}")
+        logger.info(f"  Lang code: {stats['lang_code_id']}")
+        if stats.get("expected_total"):
+            logger.info(f"  Target count: {stats['expected_total']}")
+        logger.info(f"  VISIT SEOUL places collected: {stats['visit_seoul_places_collected']}")
+        logger.info(f"  Places saved: {stats['places_saved']}")
+        logger.info(f"  Quests created: {stats['quests_created']}")
+        logger.info(f"  Embeddings created: {stats['embeddings_created']}")
+        logger.info(f"  Errors: {len(stats['errors'])}")
+        
+        if stats['errors']:
+            logger.warning("Errors occurred during collection:")
+            for error in stats['errors'][:10]:
+                logger.warning(f"  - {error}")
+            if len(stats['errors']) > 10:
+                logger.warning(f"  ... and {len(stats['errors']) - 10} more errors")
+        
+        logger.info("=" * 60)
 
 
 if __name__ == "__main__":

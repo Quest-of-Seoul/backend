@@ -291,12 +291,11 @@ def save_place(place_data: Dict) -> Optional[str]:
             logger.error("Place coordinates are required")
             return None
         
-        # 중복 체크 (이름과 좌표로)
+        # 중복 체크 (이름으로만 - UNIQUE 제약이 name에 있음)
+        # 이름이 같으면 같은 장소로 간주하고 업데이트
         existing = db.table("places") \
             .select("id") \
             .ilike("name", place_data["name"]) \
-            .eq("latitude", place_data["latitude"]) \
-            .eq("longitude", place_data["longitude"]) \
             .limit(1) \
             .execute()
         
@@ -351,12 +350,24 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
             place.get("district"),
             quest_points
         )
+        
+        # 문자열 길이 제한 검증 (스키마 제약 조건)
+        quest_name = place.get("name") or ""
+        if len(quest_name) > 255:
+            logger.warning(f"Quest name exceeds 255 characters, truncating: {quest_name[:50]}...")
+            quest_name = quest_name[:255]
+        
+        quest_category = place.get("category") or ""
+        if quest_category and len(quest_category) > 50:
+            logger.warning(f"Quest category exceeds 50 characters, truncating: {quest_category[:50]}...")
+            quest_category = quest_category[:50]
+        
         quest_insert = {
             "place_id": place_id,
-            "name": place.get("name"),
-            "title": place.get("name"),
+            "name": quest_name,
+            "title": quest_name,  # title도 255자 제한
             "description": place.get("description"),
-            "category": place.get("category"),
+            "category": quest_category,
             "latitude": float(place.get("latitude")),
             "longitude": float(place.get("longitude")),
             "reward_point": quest_points,
@@ -395,3 +406,40 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
         logger.error(f"Error creating quest: {e}", exc_info=True)
         return None
 
+
+def save_quest_quizzes(quest_id: int, quizzes: List[Dict]) -> List[int]:
+    """
+    퀘스트에 퀴즈들을 저장
+    
+    Args:
+        quest_id: 퀘스트 ID
+        quizzes: 퀴즈 리스트 (각 퀴즈는 question, options, correct_answer, hint, explanation, difficulty 포함)
+    
+    Returns:
+        생성된 퀴즈 ID 리스트
+    """
+    try:
+        db = get_db()
+        quiz_ids = []
+        
+        for quiz in quizzes:
+            quiz_data = {
+                "quest_id": quest_id,
+                "question": quiz.get("question", ""),
+                "options": quiz.get("options", []),
+                "correct_answer": quiz.get("correct_answer", 0),
+                "hint": quiz.get("hint"),
+                "explanation": quiz.get("explanation"),
+                "difficulty": quiz.get("difficulty", "easy")
+            }
+            
+            result = db.table("quest_quizzes").insert(quiz_data).execute()
+            if result.data:
+                quiz_ids.append(result.data[0].get("id"))
+        
+        logger.info(f"Saved {len(quiz_ids)} quizzes for quest {quest_id}")
+        return quiz_ids
+    
+    except Exception as e:
+        logger.error(f"Error saving quest quizzes: {e}", exc_info=True)
+        return []

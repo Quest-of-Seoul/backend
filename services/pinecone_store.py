@@ -192,3 +192,92 @@ def fetch_vector_by_id(vector_id: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Fetch error: {e}", exc_info=True)
         return None
+
+
+def search_text_embeddings(
+    text_embedding: List[float],
+    match_threshold: float = 0.7,
+    match_count: int = 5,
+    filter_dict: Optional[Dict] = None
+) -> List[Dict]:
+    """Search text embeddings in Pinecone"""
+    try:
+        index = get_pinecone_index()
+        
+        query_params = {
+            "vector": text_embedding,
+            "top_k": match_count,
+            "include_metadata": True
+        }
+        
+        # 텍스트 임베딩만 필터링
+        if filter_dict:
+            query_params["filter"] = filter_dict
+        else:
+            query_params["filter"] = {"type": {"$eq": "text"}}
+        
+        results = index.query(**query_params)
+        
+        if not results or not results.get('matches'):
+            logger.info("No similar text embeddings found")
+            return []
+        
+        similar_places = []
+        for match in results['matches']:
+            score = match.get('score', 0.0)
+            
+            if score >= match_threshold:
+                place_id = match['metadata'].get('place_id')
+                
+                place = None
+                if place_id:
+                    place = get_place_by_id(place_id)
+                
+                similar_places.append({
+                    "id": match['id'],
+                    "place_id": place_id,
+                    "similarity": score,
+                    "place": place,
+                    "rag_text": match['metadata'].get('rag_text', '')
+                })
+        
+        logger.info(f"Found {len(similar_places)} text matches (threshold: {match_threshold})")
+        return similar_places
+    
+    except Exception as e:
+        logger.error(f"Text search error: {e}", exc_info=True)
+        return []
+
+
+def upsert_text_embedding(
+    place_id: str,
+    text_embedding: List[float],
+    rag_text: str,
+    metadata: Optional[Dict] = None
+) -> Optional[str]:
+    """Save text embedding to Pinecone"""
+    try:
+        index = get_pinecone_index()
+        
+        vector_id = f"text-{place_id}"
+        
+        embedding_metadata = {
+            "type": "text",
+            "place_id": place_id,
+            "rag_text": rag_text[:1000] if rag_text else ""  # 메타데이터 크기 제한
+        }
+        
+        if metadata:
+            embedding_metadata.update(metadata)
+        
+        index.upsert(
+            vectors=[(vector_id, text_embedding, embedding_metadata)],
+            namespace=""
+        )
+        
+        logger.info(f"Text embedding saved: {vector_id}")
+        return vector_id
+    
+    except Exception as e:
+        logger.error(f"Text embedding upsert error: {e}", exc_info=True)
+        return None

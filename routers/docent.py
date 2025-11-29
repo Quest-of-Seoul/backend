@@ -18,14 +18,14 @@ router = APIRouter()
 class DocentRequest(BaseModel):
     landmark: str
     user_message: Optional[str] = None
-    language: str = "ko"
+    language: str = "en"
     prefer_url: bool = False
     enable_tts: bool = True
 
 
 class TTSRequest(BaseModel):
     text: str
-    language_code: str = "ko-KR"
+    language_code: str = "en-US"
     prefer_url: bool = False
 
 
@@ -38,7 +38,7 @@ async def chat_with_docent(request: DocentRequest, user_id: str = Depends(get_cu
         ai_response = generate_docent_message(
             landmark=request.landmark,
             user_message=request.user_message,
-            language=request.language
+            language="en"
         )
 
         audio_url = None
@@ -46,7 +46,7 @@ async def chat_with_docent(request: DocentRequest, user_id: str = Depends(get_cu
 
         if request.enable_tts:
             try:
-                language_code = f"{request.language}-KR" if request.language == "ko" else "en-US"
+                language_code = "en-US"
 
                 if request.prefer_url:
                     audio_url, audio_base64 = text_to_speech_url(
@@ -92,11 +92,11 @@ async def chat_with_docent(request: DocentRequest, user_id: str = Depends(get_cu
 
 
 @router.post("/quiz")
-async def get_quiz(landmark: str, language: str = "ko"):
+async def get_quiz(landmark: str, language: str = "en"):
     """Generate quiz question about landmark"""
     try:
         logger.info(f"Quiz generation: {landmark}")
-        quiz = generate_quiz(landmark, language)
+        quiz = generate_quiz(landmark, "en")
         return quiz
     except Exception as e:
         logger.error(f"Quiz error: {e}", exc_info=True)
@@ -179,7 +179,7 @@ async def websocket_tts(websocket: WebSocket):
         request_data = json.loads(data)
 
         text = request_data.get("text", "")
-        language_code = request_data.get("language_code", "ko-KR")
+        language_code = request_data.get("language_code", "en-US")
 
         logger.info(f"TTS WS request: {len(text)} chars")
 
@@ -241,7 +241,7 @@ async def websocket_chat(websocket: WebSocket):
         user_id = request_data.get("user_id", "")
         landmark = request_data.get("landmark", "")
         user_message = request_data.get("user_message")
-        language = request_data.get("language", "ko")
+        language = request_data.get("language", "en")
         enable_tts = request_data.get("enable_tts", True)
 
         logger.info(f"Chat WS: {landmark} (TTS: {enable_tts})")
@@ -272,7 +272,7 @@ async def websocket_chat(websocket: WebSocket):
             logger.warning(f"Failed to save chat log: {db_error}")
 
         if enable_tts:
-            language_code = f"{language}-KR" if language == "ko" else "en-US"
+            language_code = "en-US"
             audio_bytes = text_to_speech_bytes(
                 text=ai_response,
                 language_code=language_code

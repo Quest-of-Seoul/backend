@@ -225,11 +225,29 @@ def merge_place_data(tour_data: Optional[Dict], visit_seoul_data: Dict, category
     # source 결정
     source = "visit_seoul"
     
+    # district는 DB 트리거가 자동으로 추출하지만, 명시적으로 None으로 설정
+    # (트리거가 address에서 자동 추출)
+    district = None
+    
+    # 문자열 길이 제한 검증 (스키마 제약 조건)
+    if name and len(name) > 255:
+        logger.warning(f"Place name exceeds 255 characters, truncating: {name[:50]}...")
+        name = name[:255]
+    
+    if final_category and len(final_category) > 50:
+        logger.warning(f"Category exceeds 50 characters, truncating: {final_category[:50]}...")
+        final_category = final_category[:50]
+    
+    if address and len(address) > 500:
+        logger.warning(f"Address exceeds 500 characters, truncating: {address[:50]}...")
+        address = address[:500]
+    
     place_data = {
         "name": name,
         "description": description,
         "category": final_category,  # 우리가 정의한 카테고리명 사용
         "address": address if address else None,
+        "district": district,  # DB 트리거가 address에서 자동 추출
         "latitude": float(latitude) if latitude else None,
         "longitude": float(longitude) if longitude else None,
         "image_url": image_url if image_url else None,

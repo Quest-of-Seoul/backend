@@ -4,7 +4,7 @@ import google.generativeai as genai
 import os
 import logging
 import json
-from typing import Optional
+from typing import Optional, List, Dict, Set
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +21,11 @@ else:
 def generate_docent_message(
     landmark: str,
     user_message: Optional[str] = None,
-    language: str = "ko"
+    language: str = "en"
 ) -> str:
     """Generate AI docent response"""
     
-    if language == "ko":
-        base_prompt = f"""당신은 '{landmark}'에 대한 친절한 AI 도슨트입니다.
-
-{f'질문: {user_message}' if user_message else '이 장소를 소개해주세요.'}
-
-친근하고 흥미롭게 3-4문장으로 답변해주세요."""
-    else:
-        base_prompt = f"""You are a friendly AI docent for '{landmark}'.
+    base_prompt = f"""You are a friendly AI docent for '{landmark}'.
 
 {f'Question: {user_message}' if user_message else 'Please introduce this place.'}
 
@@ -43,24 +36,13 @@ Provide an engaging response in 3-4 sentences."""
         return response.text
     except Exception as e:
         logger.error(f"Gemini error: {e}", exc_info=True)
-        return "응답을 생성할 수 없습니다." if language == "ko" else "Cannot generate response."
+        return "Cannot generate response."
 
 
-def generate_quiz(landmark: str, language: str = "ko") -> dict:
+def generate_quiz(landmark: str, language: str = "en") -> dict:
     """Generate quiz about landmark"""
     
-    if language == "ko":
-        prompt = f"""{landmark}에 대한 퀴즈를 만들어주세요.
-
-다음 JSON 형식으로 반환:
-{{
-    "question": "퀴즈 질문",
-    "options": ["선택지1", "선택지2", "선택지3", "선택지4"],
-    "correct_answer": 0,
-    "explanation": "정답 설명"
-}}"""
-    else:
-        prompt = f"""Create a quiz about {landmark}.
+    prompt = f"""Create a quiz about {landmark}.
 
 Return in JSON format:
 {{
@@ -83,7 +65,187 @@ Return in JSON format:
     except Exception as e:
         logger.error(f"Quiz generation error: {e}", exc_info=True)
         return {
-            "question": "퀴즈를 생성할 수 없습니다." if language == "ko" else "Cannot generate quiz.",
+            "question": "Cannot generate quiz.",
             "options": ["A", "B", "C", "D"],
             "correct_answer": 0
         }
+
+
+def generate_quest_quizzes(
+    place_name: str,
+    place_description: Optional[str] = None,
+    place_category: Optional[str] = None,
+    language: str = "ko",
+    count: int = 5
+) -> List[Dict]:
+    """
+    Generate multiple quizzes (default 5) for a quest place
+    
+    Args:
+        place_name: 장소 이름
+        place_description: 장소 설명 (선택)
+        place_category: 장소 카테고리 (선택)
+        language: 언어 (기본값: "ko")
+        count: 생성할 퀴즈 개수 (기본값: 5)
+    
+    Returns:
+        퀴즈 리스트 (각 퀴즈는 question, options, correct_answer, hint, explanation, difficulty 포함)
+    """
+    if not GEMINI_AVAILABLE:
+        logger.warning("Gemini not available, cannot generate quizzes")
+        return []
+    
+    try:
+        description_text = f"\nDescription: {place_description}" if place_description else ""
+        category_text = f"\nCategory: {place_category}" if place_category else ""
+        
+        prompt = f"""Create exactly {count} diverse quiz questions about the place "{place_name}".{description_text}{category_text}
+
+Requirements:
+1. Each quiz should have different difficulty levels (easy, medium, hard)
+2. Questions should cover various aspects: history, architecture, significance, location, features, etc.
+3. Each question must have exactly 4 options
+4. correct_answer should be 0, 1, 2, or 3 (index of correct option)
+5. Include helpful hints and explanations
+6. Use {language} language
+
+Return in JSON format:
+{{
+    "quizzes": [
+        {{
+            "question": "Question text",
+            "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
+            "correct_answer": 0,
+            "hint": "Helpful hint",
+            "explanation": "Detailed explanation",
+            "difficulty": "easy" // or "medium" or "hard"
+        }}
+    ]
+}}"""
+
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        
+        # Extract JSON
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        
+        result = json.loads(text.strip())
+        quizzes = result.get("quizzes", [])
+        
+        # Validate and normalize quizzes
+        validated_quizzes = []
+        for quiz in quizzes[:count]:  # Limit to requested count
+            if not isinstance(quiz.get("options"), list) or len(quiz.get("options", [])) != 4:
+                continue
+            if quiz.get("correct_answer") not in [0, 1, 2, 3]:
+                continue
+            
+            validated_quizzes.append({
+                "question": quiz.get("question", ""),
+                "options": quiz.get("options", []),
+                "correct_answer": quiz.get("correct_answer", 0),
+                "hint": quiz.get("hint", ""),
+                "explanation": quiz.get("explanation", ""),
+                "difficulty": quiz.get("difficulty", "easy")
+            })
+        
+        logger.info(f"Generated {len(validated_quizzes)} quizzes for {place_name}")
+        return validated_quizzes
+    
+    except Exception as e:
+        logger.error(f"Error generating quest quizzes: {e}", exc_info=True)
+        return []
+
+
+def generate_route_recommendation(
+    candidate_quests: list,
+    preferences: dict,
+    completed_quest_ids: set,
+    language: str = "en"
+) -> list:
+    """AI-based travel itinerary recommendation"""
+    if not GEMINI_AVAILABLE:
+        logger.warning("Gemini not available, using fallback")
+        return []
+    
+    try:
+        # Organize candidate quest information
+        quest_info_list = []
+        for quest in candidate_quests[:20]:  # Only top 20 passed to AI
+            quest_info = {
+                "id": quest.get("id"),
+                "name": quest.get("name", ""),
+                "category": quest.get("category", ""),
+                "district": quest.get("district", ""),
+                "latitude": quest.get("latitude"),
+                "longitude": quest.get("longitude"),
+                "reward_point": quest.get("reward_point", 100),
+                "completion_count": quest.get("completion_count", 0),
+                "description": quest.get("description", "")[:200]
+            }
+            quest_info_list.append(quest_info)
+        
+        # Organize preference information
+        theme = preferences.get("theme") or preferences.get("category") or "Seoul Travel"
+        if isinstance(theme, dict):
+            theme = theme.get("name", "Seoul Travel")
+        
+        districts = preferences.get("districts") or []
+        if isinstance(districts, list) and districts:
+            districts_str = ", ".join(districts)
+        else:
+            districts_str = "No restriction"
+        
+        prompt = f"""You are a Seoul travel expert. Recommend an optimal travel itinerary based on user preferences.
+
+[User Preferences]
+- Theme: {theme}
+- Preferred Districts: {districts_str}
+- Completed Quests: {len(completed_quest_ids)}
+
+[Candidate Quests]
+{json.dumps(quest_info_list, ensure_ascii=False, indent=2)}
+
+[Requirements]
+1. Select exactly 4 quests
+2. Exclude completed quests (IDs: {list(completed_quest_ids)[:10]})
+3. Consider theme and preferred districts
+4. Arrange in efficient order considering travel distance and time
+5. Consider category diversity
+
+Return in JSON format:
+{{
+    "selected_quest_ids": [quest ID array, 4 items],
+    "reasoning": "Selection reasoning",
+    "route_order": "Visit order explanation"
+}}"""
+        
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        
+        # Extract JSON
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        
+        result = json.loads(text.strip())
+        selected_ids = result.get("selected_quest_ids", [])
+        
+        # Return selected quests
+        selected_quests = []
+        quest_dict = {q.get("id"): q for q in candidate_quests}
+        
+        for quest_id in selected_ids:
+            if quest_id in quest_dict:
+                selected_quests.append(quest_dict[quest_id])
+        
+        logger.info(f"AI recommended {len(selected_quests)} quests: {result.get('reasoning', '')[:100]}")
+        return selected_quests
+    
+    except Exception as e:
+        logger.error(f"AI route recommendation error: {e}", exc_info=True)
+        return []
