@@ -3,8 +3,9 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from services.db import get_db, ensure_user_exists
+from services.db import get_db, ensure_user_exists, save_quest_quizzes
 from services.auth_deps import get_current_user_id, get_current_user_id_optional
+from services.ai import generate_quest_quizzes
 from datetime import datetime
 import math
 import logging
@@ -368,6 +369,7 @@ async def get_quest_detail(quest_id: int, user_id: Optional[str] = Depends(get_c
 async def get_quest_quizzes(quest_id: int):
     """
     Retrieve quizzes tied to a quest/place so that the frontend can start testing immediately after quest start.
+    If no quizzes exist, generate them using AI and save to database.
     """
     try:
         db = get_db()
@@ -389,6 +391,53 @@ async def get_quest_quizzes(quest_id: int):
                 "explanation": quiz.get("explanation"),
                 "difficulty": quiz.get("difficulty", "easy")
             })
+
+        # If no quizzes exist, generate them using AI
+        if len(quizzes) == 0:
+            logger.info(f"No quizzes found for quest {quest_id}, generating with AI...")
+            
+            place = quest.get("place", {})
+            place_name = quest.get("name") or place.get("name", "")
+            place_description = quest.get("description") or place.get("description")
+            place_category = quest.get("category") or place.get("category")
+            
+            # Generate quizzes using AI
+            generated_quizzes = generate_quest_quizzes(
+                place_name=place_name,
+                place_description=place_description,
+                place_category=place_category,
+                language="ko",
+                count=5
+            )
+            
+            if generated_quizzes:
+                # Save generated quizzes to database
+                quiz_ids = save_quest_quizzes(quest_id, generated_quizzes)
+                
+                # Fetch saved quizzes to return with IDs
+                if quiz_ids:
+                    saved_quizzes_result = db.table("quest_quizzes") \
+                        .select("*") \
+                        .eq("quest_id", quest_id) \
+                        .order("id") \
+                        .execute()
+                    
+                    quizzes = []
+                    for quiz in saved_quizzes_result.data or []:
+                        quizzes.append({
+                            "id": quiz.get("id"),
+                            "question": quiz.get("question"),
+                            "options": quiz.get("options"),
+                            "hint": quiz.get("hint"),
+                            "explanation": quiz.get("explanation"),
+                            "difficulty": quiz.get("difficulty", "easy")
+                        })
+                    
+                    logger.info(f"Generated and saved {len(quizzes)} quizzes for quest {quest_id}")
+                else:
+                    logger.warning(f"Failed to save generated quizzes for quest {quest_id}")
+            else:
+                logger.warning(f"Failed to generate quizzes for quest {quest_id}")
 
         return {
             "quest": quest,

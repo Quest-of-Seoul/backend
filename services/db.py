@@ -405,3 +405,41 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
     except Exception as e:
         logger.error(f"Error creating quest: {e}", exc_info=True)
         return None
+
+
+def save_quest_quizzes(quest_id: int, quizzes: List[Dict]) -> List[int]:
+    """
+    퀘스트에 퀴즈들을 저장
+    
+    Args:
+        quest_id: 퀘스트 ID
+        quizzes: 퀴즈 리스트 (각 퀴즈는 question, options, correct_answer, hint, explanation, difficulty 포함)
+    
+    Returns:
+        생성된 퀴즈 ID 리스트
+    """
+    try:
+        db = get_db()
+        quiz_ids = []
+        
+        for quiz in quizzes:
+            quiz_data = {
+                "quest_id": quest_id,
+                "question": quiz.get("question", ""),
+                "options": quiz.get("options", []),
+                "correct_answer": quiz.get("correct_answer", 0),
+                "hint": quiz.get("hint"),
+                "explanation": quiz.get("explanation"),
+                "difficulty": quiz.get("difficulty", "easy")
+            }
+            
+            result = db.table("quest_quizzes").insert(quiz_data).execute()
+            if result.data:
+                quiz_ids.append(result.data[0].get("id"))
+        
+        logger.info(f"Saved {len(quiz_ids)} quizzes for quest {quest_id}")
+        return quiz_ids
+    
+    except Exception as e:
+        logger.error(f"Error saving quest quizzes: {e}", exc_info=True)
+        return []

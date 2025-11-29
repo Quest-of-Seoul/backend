@@ -71,6 +71,95 @@ Return in JSON format:
         }
 
 
+def generate_quest_quizzes(
+    place_name: str,
+    place_description: Optional[str] = None,
+    place_category: Optional[str] = None,
+    language: str = "ko",
+    count: int = 5
+) -> List[Dict]:
+    """
+    Generate multiple quizzes (default 5) for a quest place
+    
+    Args:
+        place_name: 장소 이름
+        place_description: 장소 설명 (선택)
+        place_category: 장소 카테고리 (선택)
+        language: 언어 (기본값: "ko")
+        count: 생성할 퀴즈 개수 (기본값: 5)
+    
+    Returns:
+        퀴즈 리스트 (각 퀴즈는 question, options, correct_answer, hint, explanation, difficulty 포함)
+    """
+    if not GEMINI_AVAILABLE:
+        logger.warning("Gemini not available, cannot generate quizzes")
+        return []
+    
+    try:
+        description_text = f"\nDescription: {place_description}" if place_description else ""
+        category_text = f"\nCategory: {place_category}" if place_category else ""
+        
+        prompt = f"""Create exactly {count} diverse quiz questions about the place "{place_name}".{description_text}{category_text}
+
+Requirements:
+1. Each quiz should have different difficulty levels (easy, medium, hard)
+2. Questions should cover various aspects: history, architecture, significance, location, features, etc.
+3. Each question must have exactly 4 options
+4. correct_answer should be 0, 1, 2, or 3 (index of correct option)
+5. Include helpful hints and explanations
+6. Use {language} language
+
+Return in JSON format:
+{{
+    "quizzes": [
+        {{
+            "question": "Question text",
+            "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
+            "correct_answer": 0,
+            "hint": "Helpful hint",
+            "explanation": "Detailed explanation",
+            "difficulty": "easy" // or "medium" or "hard"
+        }}
+    ]
+}}"""
+
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        
+        # Extract JSON
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        
+        result = json.loads(text.strip())
+        quizzes = result.get("quizzes", [])
+        
+        # Validate and normalize quizzes
+        validated_quizzes = []
+        for quiz in quizzes[:count]:  # Limit to requested count
+            if not isinstance(quiz.get("options"), list) or len(quiz.get("options", [])) != 4:
+                continue
+            if quiz.get("correct_answer") not in [0, 1, 2, 3]:
+                continue
+            
+            validated_quizzes.append({
+                "question": quiz.get("question", ""),
+                "options": quiz.get("options", []),
+                "correct_answer": quiz.get("correct_answer", 0),
+                "hint": quiz.get("hint", ""),
+                "explanation": quiz.get("explanation", ""),
+                "difficulty": quiz.get("difficulty", "easy")
+            })
+        
+        logger.info(f"Generated {len(validated_quizzes)} quizzes for {place_name}")
+        return validated_quizzes
+    
+    except Exception as e:
+        logger.error(f"Error generating quest quizzes: {e}", exc_info=True)
+        return []
+
+
 def generate_route_recommendation(
     candidate_quests: list,
     preferences: dict,
