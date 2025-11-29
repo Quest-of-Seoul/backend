@@ -630,6 +630,30 @@ VALUES
      '근정전은 경복궁의 정전으로, 왕이 조회를 받고 국가의 중요한 의식을 거행하던 곳입니다.',
      'medium'),
     
+    ((SELECT id FROM quests WHERE name = 'Gyeongbokgung Palace' LIMIT 1),
+     '경복궁에서 가장 큰 연못이 있는 전각은 무엇인가요?',
+     '["경회루", "향원정", "아미산", "함화당"]'::jsonb,
+     0,
+     '왕이 연회를 베풀던 곳으로, 연못 위에 세워진 누각입니다',
+     '경회루는 경복궁에서 가장 큰 연못인 태원지 위에 세워진 누각으로, 왕이 연회를 베풀던 곳입니다.',
+     'medium'),
+    
+    ((SELECT id FROM quests WHERE name = 'Gyeongbokgung Palace' LIMIT 1),
+     '경복궁이 일제강점기 동안 어떻게 되었나요?',
+     '["완전히 철거됨", "일본 총독부 청사로 사용됨", "박물관으로 전환됨", "그대로 보존됨"]'::jsonb,
+     1,
+     '일본이 조선의 상징을 없애기 위해 철거했습니다',
+     '일제강점기 동안 경복궁의 많은 전각들이 철거되었고, 그 자리에 조선총독부 청사가 건립되었습니다.',
+     'hard'),
+    
+    ((SELECT id FROM quests WHERE name = 'Gyeongbokgung Palace' LIMIT 1),
+     '경복궁의 남문 이름은 무엇인가요?',
+     '["광화문", "흥인지문", "숭례문", "돈의문"]'::jsonb,
+     0,
+     '현재 세종대왕 동상이 있는 광장과 연결된 문입니다',
+     '경복궁의 남문은 광화문으로, 현재 광화문광장과 연결되어 있습니다.',
+     'easy'),
+    
     -- N Seoul Tower 퀴즈
     ((SELECT id FROM quests WHERE name = 'N Seoul Tower' LIMIT 1),
      'N서울타워의 해발고도는 얼마인가요?',
@@ -645,6 +669,30 @@ VALUES
      1,
      '서울 중심부에 위치한 서울의 대표적인 산입니다',
      'N서울타워는 남산에 위치해 있으며, 서울 시내를 한눈에 내려다볼 수 있습니다.',
+     'easy'),
+    
+    ((SELECT id FROM quests WHERE name = 'N Seoul Tower' LIMIT 1),
+     'N서울타워의 공식 명칭은 무엇인가요?',
+     '["서울타워", "남산타워", "서울N타워", "N서울타워"]'::jsonb,
+     3,
+     '2005년에 변경된 공식 명칭입니다',
+     'N서울타워는 2005년에 "서울타워"에서 "N서울타워"로 공식 명칭이 변경되었습니다. N은 New, Nature, Night의 의미를 담고 있습니다.',
+     'medium'),
+    
+    ((SELECT id FROM quests WHERE name = 'N Seoul Tower' LIMIT 1),
+     'N서울타워에서 볼 수 있는 특별한 시설은 무엇인가요?',
+     '["로맨틱 테라스", "스카이 데크", "회전 레스토랑", "모두 해당"]'::jsonb,
+     3,
+     '커플과 관광객들이 즐기는 다양한 시설이 있습니다',
+     'N서울타워에는 로맨틱 테라스, 스카이 데크, 회전 레스토랑 등 다양한 시설이 있어 서울의 전경을 감상할 수 있습니다.',
+     'easy'),
+    
+    ((SELECT id FROM quests WHERE name = 'N Seoul Tower' LIMIT 1),
+     'N서울타워의 대표적인 관광 명소는 무엇인가요?',
+     '["사랑의 자물쇠", "타임캡슐", "전망대", "모두 해당"]'::jsonb,
+     3,
+     '커플들이 많이 찾는 장소로 유명합니다',
+     'N서울타워는 사랑의 자물쇠로 유명하며, 전망대와 타임캡슐 등 다양한 관광 시설이 있습니다.',
      'easy'),
     
     -- Gwanghwamun Square 퀴즈
@@ -663,6 +711,30 @@ VALUES
      '임진왜란 때 활약한 해군 장수입니다',
      '광화문광장에는 세종대왕 동상과 함께 이순신 장군 동상이 세워져 있습니다.',
      'medium'),
+    
+    ((SELECT id FROM quests WHERE name = 'Gwanghwamun Square' LIMIT 1),
+     '광화문광장이 조성된 연도는 언제인가요?',
+     '["2007년", "2009년", "2011년", "2013년"]'::jsonb,
+     1,
+     '2000년대 후반에 조성되었습니다',
+     '광화문광장은 2009년에 조성되어 서울의 대표적인 광장이 되었습니다.',
+     'medium'),
+    
+    ((SELECT id FROM quests WHERE name = 'Gwanghwamun Square' LIMIT 1),
+     '광화문광장의 주요 특징은 무엇인가요?',
+     '["역사적 인물 동상", "분수대", "문화 공간", "모두 해당"]'::jsonb,
+     3,
+     '역사, 문화, 휴게 공간이 결합된 복합 공간입니다',
+     '광화문광장은 세종대왕과 이순신 장군 동상, 분수대, 그리고 다양한 문화 행사가 열리는 복합 공간입니다.',
+     'easy'),
+    
+    ((SELECT id FROM quests WHERE name = 'Gwanghwamun Square' LIMIT 1),
+     '광화문광장에서 가장 가까운 궁궐은 무엇인가요?',
+     '["경복궁", "창덕궁", "덕수궁", "창경궁"]'::jsonb,
+     0,
+     '광화문광장 바로 뒤에 위치한 궁궐입니다',
+     '광화문광장은 경복궁의 남문인 광화문 앞에 위치한 광장으로, 경복궁과 바로 연결되어 있습니다.',
+     'easy'),
     
     -- Myeongdong Cathedral 퀴즈 (5개)
     ((SELECT id FROM quests WHERE name = 'Myeongdong Cathedral' LIMIT 1),
@@ -720,6 +792,30 @@ VALUES
      0,
      '조선시대 상류층이 살던 곳입니다',
      '북촌한옥마을은 조선시대 양반과 귀족들이 거주하던 주거지역으로, 전통 한옥이 밀집해 있습니다.',
+     'medium'),
+    
+    ((SELECT id FROM quests WHERE name = 'Bukchon Hanok Village' LIMIT 1),
+     '북촌한옥마을이 "북촌"이라고 불리는 이유는 무엇인가요?',
+     '["경복궁 북쪽에 위치해서", "북한산 근처에 있어서", "북쪽 지역이라서", "북촌이라는 고유 지명"]'::jsonb,
+     0,
+     '조선시대 궁궐과 관련이 있습니다',
+     '북촌은 경복궁과 창덕궁 북쪽에 위치한 지역이라 "북촌"이라고 불립니다.',
+     'medium'),
+    
+    ((SELECT id FROM quests WHERE name = 'Bukchon Hanok Village' LIMIT 1),
+     '북촌한옥마을에서 체험할 수 있는 것은 무엇인가요?',
+     '["한옥 체험", "전통 공예", "한복 착용", "모두 해당"]'::jsonb,
+     3,
+     '전통 문화를 직접 체험할 수 있는 다양한 프로그램이 있습니다',
+     '북촌한옥마을에서는 한옥 체험, 전통 공예, 한복 착용 등 다양한 전통 문화 체험 프로그램을 즐길 수 있습니다.',
+     'easy'),
+    
+    ((SELECT id FROM quests WHERE name = 'Bukchon Hanok Village' LIMIT 1),
+     '북촌한옥마을의 주요 골목길 이름은 무엇인가요?',
+     '["가회동길", "계동길", "삼청동길", "모두 해당"]'::jsonb,
+     3,
+     '여러 골목길이 유명합니다',
+     '북촌한옥마을은 가회동, 계동, 삼청동 일대의 여러 골목길로 구성되어 있으며, 각각 고유한 매력을 가지고 있습니다.',
      'medium');
 
 -- Sample Rewards
