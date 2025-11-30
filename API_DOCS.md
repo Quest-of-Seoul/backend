@@ -35,6 +35,10 @@ JWT Bearer 토큰 기반 인증을 사용합니다.
 
 ## Endpoints Overview
 
+### General (일반)
+- GET `/` - API 루트 엔드포인트
+- GET `/health` - 서비스 상태 확인
+
 ### Authentication (인증)
 - POST `/auth/signup` - 회원가입
 - POST `/auth/login` - 로그인
@@ -98,11 +102,11 @@ JWT Bearer 토큰 기반 인증을 사용합니다.
 - POST `/ai-station/quest/rag-chat` - 퀘스트 모드 채팅 (인증 필요)
 - POST `/ai-station/quest/vlm-chat` - 퀘스트 모드 VLM 채팅 (인증 필요)
 - POST `/ai-station/stt-tts` - STT + TTS 통합 (인증 필요)
+- POST `/ai-station/route-recommend` - 여행 일정 추천 (인증 필요)
 
 ### Location (위치 추적)
 - POST `/location/track` - 주기적 위치 추적 (인증 필요)
 - GET `/location/track/history` - 이동 경로 조회 (인증 필요)
-- POST `/ai-station/route-recommend` - 여행 일정 추천 (인증 필요)
 
 ### Analytics (분석 및 통계)
 - GET `/analytics/location-stats/district` - 지자체별 위치 정보 통계 (인증 필요)
@@ -225,7 +229,7 @@ AI 도슨트와 대화
 {
   "landmark": "경복궁",
   "user_message": "근정전에 대해 알려줘",
-  "language": "ko",
+  "language": "en",
   "prefer_url": false,
   "enable_tts": true
 }
@@ -237,7 +241,7 @@ AI 도슨트와 대화
 |-------|------|----------|-------------|
 | landmark | string | 필수 | 장소명 |
 | user_message | string | 선택 | 사용자 질문 |
-| language | string | 선택 | 언어 (ko/en, 기본: ko) |
+| language | string | 선택 | 언어 (ko/en, 기본: en) |
 | prefer_url | boolean | 선택 | 오디오 URL 선호 (기본: false) |
 | enable_tts | boolean | 선택 | TTS 활성화 (기본: true) |
 
@@ -251,6 +255,10 @@ AI 도슨트와 대화
   "audio_url": "https://storage.url/audio.mp3_or_null"
 }
 ```
+
+**Notes:**
+- `enable_tts=false`일 때는 `audio`와 `audio_url`이 포함되지 않습니다
+- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다
 
 **Status Codes:**
 - 200: 성공
@@ -267,7 +275,7 @@ AI 도슨트와 대화
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | landmark | string | 필수 | 장소명 |
-| language | string | 선택 | 언어 (ko/en, 기본: ko) |
+| language | string | 선택 | 언어 (ko/en, 기본: en) |
 
 **Response:**
 
@@ -301,18 +309,31 @@ AI 도슨트와 대화
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | text | string | 필수 | 변환할 텍스트 |
-| language_code | string | 선택 | 언어 코드 (기본: ko-KR) |
+| language_code | string | 선택 | 언어 코드 (기본: en-US) |
 | prefer_url | boolean | 선택 | URL 반환 여부 (기본: false) |
 
-**Response:**
+**Response (prefer_url=false):**
 
 ```json
 {
   "audio": "base64_encoded_audio",
-  "audio_url": "https://storage.url/audio.mp3_or_null",
   "text": "안녕하세요. 경복궁에 오신 것을 환영합니다."
 }
 ```
+
+**Response (prefer_url=true):**
+
+```json
+{
+  "audio": "base64_encoded_audio",
+  "audio_url": "https://storage.url/audio.mp3",
+  "text": "안녕하세요. 경복궁에 오신 것을 환영합니다."
+}
+```
+
+**Notes:**
+- `prefer_url=false`일 때는 `audio`만 반환됩니다
+- `prefer_url=true`일 때는 `audio_url`과 `audio` 모두 반환됩니다
 
 ---
 
@@ -417,11 +438,18 @@ TTS 스트리밍
       "completion_count": 0,
       "created_at": "2025-11-22T10:14:30.222474",
       "district": "Jongno-gu",
-      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp"
+      "address": "서울 종로구 사직로 161",
+      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
+      "place_images": ["https://.../image1.jpg", "https://.../image2.jpg"]
     }
   ]
 }
 ```
+
+**Notes:**
+- `category`와 `district`는 place 정보에서 가져오며, quest에 이미 있으면 quest 값을 사용합니다
+- `address`, `place_image_url`, `place_images`는 place 정보에서 가져옵니다
+- place 정보가 없으면 해당 필드들이 포함되지 않을 수 있습니다
 
 ---
 
@@ -564,6 +592,15 @@ TTS 스트리밍
 }
 ```
 
+**Response (이미 완료된 경우):**
+
+```json
+{
+  "status": "success",
+  "message": "Quest already completed"
+}
+```
+
 **Response (진행 중):**
 
 ```json
@@ -574,7 +611,7 @@ TTS 스트리밍
 ```
 
 **Notes:**
-- `completed` 상태에서 다시 `completed`를 호출해도 추가 포인트가 적립되지 않습니다.
+- `completed` 상태에서 다시 `completed`를 호출하면 "Quest already completed" 메시지가 반환되고 추가 포인트가 적립되지 않습니다.
 - 퀘스트 포인트는 퀴즈 정답 제출 (`/quest/{quest_id}/quizzes/{quiz_id}/submit`)과 `update_quest_progress` 중 하나만 사용하세요.
 
 ---
@@ -652,8 +689,9 @@ TTS 스트리밍
 ```
 
 **Notes:**
-- `user_id` 쿼리 파라미터를 전달하면 해당 유저의 진행 상태(`user_status`)와 현재 포인트(`user_points`)가 포함됩니다.
-- `user_id`가 없으면 `quest` 필드만 반환됩니다.
+- `Authorization` 헤더에 Bearer 토큰을 포함하면 해당 유저의 진행 상태(`user_status`)와 현재 포인트(`user_points`)가 포함됩니다.
+- 인증 토큰이 없으면 `quest` 필드만 반환됩니다.
+- 인증은 선택적이며, 토큰이 없어도 퀘스트 정보는 조회 가능합니다.
 
 ---
 
@@ -676,12 +714,17 @@ TTS 스트리밍
       "question": "경복궁의 정전 이름은?",
       "options": ["근정전", "중화전", "명정전", "진전"],
       "hint": "왕이 공식 업무를 보던 전각",
+      "explanation": "근정전은 경복궁의 정전으로...",
       "difficulty": "easy"
     }
   ],
   "count": 1
 }
 ```
+
+**Notes:**
+- 퀴즈가 없으면 AI로 자동 생성하여 데이터베이스에 저장한 후 반환합니다
+- 생성된 퀴즈는 이후 요청에서 재사용됩니다
 
 ---
 
@@ -974,7 +1017,7 @@ TTS 스트리밍
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| reward_id | integer | 필수 | 리워드 ID |
+| reward_id | integer | 필수 | 사용자가 획득한 리워드의 ID (user_rewards 테이블의 id) |
 
 **Response:**
 
@@ -984,6 +1027,16 @@ TTS 스트리밍
   "message": "Reward marked as used"
 }
 ```
+
+**Status Codes:**
+- 200: 성공
+- 400: 이미 사용된 리워드
+- 404: 리워드를 찾을 수 없음
+- 500: 서버 오류
+
+**Notes:**
+- `reward_id`는 `/reward/claimed`에서 반환되는 `claimed_rewards` 배열의 각 항목의 `id` 필드를 사용합니다
+- 이미 사용된 리워드(`used_at`이 null이 아님)를 다시 사용하려고 하면 400 에러가 반환됩니다
 
 ---
 
@@ -1017,12 +1070,12 @@ TTS 스트리밍
 | image | string | 필수 | Base64 인코딩 이미지 |
 | latitude | float | 선택 | 위도 |
 | longitude | float | 선택 | 경도 |
-| language | string | 선택 | 언어 (ko/en, 기본: ko) |
+| language | string | 선택 | 언어 (ko/en, 기본: en) |
 | prefer_url | boolean | 선택 | 오디오 URL 선호 (기본: true) |
 | enable_tts | boolean | 선택 | TTS 활성화 (기본: true) |
 | use_cache | boolean | 선택 | 캐시 사용 (기본: true) |
 
-**Response:**
+**Response (일반):**
 
 ```json
 {
@@ -1037,9 +1090,11 @@ TTS 스트리밍
   "vlm_analysis": "Place Name: 경복궁...",
   "similar_places": [
     {
-      "place_id": "place-001",
-      "similarity": 0.95,
-      "image_url": "https://..."
+      "place": {
+        "id": "place-001",
+        "name": "경복궁"
+      },
+      "similarity": 0.95
     }
   ],
   "confidence_score": 0.92,
@@ -1048,6 +1103,25 @@ TTS 스트리밍
   "audio_url": "https://storage.url/audio.mp3"
 }
 ```
+
+**Response (캐시된 결과):**
+
+```json
+{
+  "cached": true,
+  "description": "경복궁은 조선시대 법궁으로...",
+  "vlm_analysis": "Place Name: 경복궁...",
+  "confidence_score": 0.92,
+  "matched_place": "place-001"
+}
+```
+
+**Note:** `matched_place` 필드는 실제로 `matched_place_id` 값을 포함합니다 (place ID 문자열).
+
+**Notes:**
+- `use_cache=true`이고 캐시된 결과가 있으면 `cached: true` 필드가 포함되고 응답 형식이 다릅니다
+- `similar_places`는 벡터 검색 결과로, 각 항목은 `place` 객체와 `similarity` 값을 포함합니다
+- `prefer_url=true`일 때만 `audio_url`이 포함되고, `enable_tts=true`일 때만 `audio` 또는 `audio_url`이 포함됩니다
 
 **Status Codes:**
 - 200: 성공
@@ -1203,6 +1277,9 @@ VLM 서비스 상태 확인
 }
 ```
 
+**Notes:**
+- `pinecone_stats`는 Pinecone 서비스가 사용 가능할 때만 포함되며, 사용 불가능하면 `null`이 반환됩니다
+
 ---
 
 ## Recommend Endpoints
@@ -1293,6 +1370,10 @@ VLM 서비스 상태 확인
   ],
   "filter": {
     "gps_enabled": true,
+    "start_location": {
+      "latitude": 37.5665,
+      "longitude": 126.9780
+    },
     "radius_km": 5.0,
     "quest_only": true
   }
@@ -1307,6 +1388,7 @@ VLM 서비스 상태 확인
 - **다중 이미지 지원**: `images` 배열에 1개 또는 최대 3개 이미지를 제공할 수 있습니다. 3개 이미지일 경우 평균 임베딩을 사용하여 더 정확한 추천을 제공합니다.
 - **DB 검증**: Pinecone에서 반환된 결과가 실제 DB에 존재하는지 검증하여, 누락된 장소는 제외하고 실제 존재하는 장소만 추천합니다.
 - **임계값**: 유사도 임계값이 0.2로 낮춰져 상위 3개 추천에 최적화되었습니다.
+- **filter.start_location**: `start_latitude`와 `start_longitude`가 제공될 때만 포함됩니다 (null일 수 있음)
 
 ---
 
@@ -1503,7 +1585,7 @@ VLM 서비스 상태 확인
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| quest_id | string | 필수 | 퀘스트 ID |
+| quest_id | integer | 필수 | 퀘스트 ID |
 
 **Response:**
 
@@ -1511,15 +1593,27 @@ VLM 서비스 상태 확인
 {
   "success": true,
   "quest": {
-    "id": "quest-001",
-    "place_id": "place-001",
-    "name": "경복궁 탐험",
-    "description": "경복궁의 역사를 알아보세요"
+    "id": 1,
+    "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
+    "name": "Gyeongbokgung Palace",
+    "title": null,
+    "description": "The main royal palace of the Joseon Dynasty, built in 1395.",
+    "category": "Historic Site",
+    "latitude": 37.579617,
+    "longitude": 126.977041,
+    "reward_point": 100,
+    "points": 10,
+    "difficulty": "easy",
+    "is_active": true,
+    "completion_count": 0,
+    "created_at": "2025-11-22T10:14:30.222474"
   },
   "place": {
-    "id": "place-001",
+    "id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
     "name": "경복궁",
-    "category": "역사유적"
+    "category": "역사유적",
+    "address": "서울 종로구 사직로 161",
+    "district": "종로구"
   },
   "quizzes": [
     {
@@ -1535,6 +1629,10 @@ VLM 서비스 상태 확인
 }
 ```
 
+**Notes:**
+- `place`가 없으면 `null`이 반환됩니다
+- `quizzes` 배열은 비어있을 수 있습니다
+
 ---
 
 ### POST /recommend/quests/{quest_id}/submit
@@ -1548,13 +1646,13 @@ VLM 서비스 상태 확인
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| quest_id | string | 필수 | 퀘스트 ID |
+| quest_id | integer | 필수 | 퀘스트 ID |
 
 **Query Parameters:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| quiz_id | string | 필수 | 퀴즈 ID |
+| quiz_id | integer | 필수 | 퀴즈 ID |
 | answer | integer | 필수 | 답안 (0-3) |
 
 **Note:** 이 엔드포인트는 `/quest/{quest_id}/quizzes/{quiz_id}/submit`을 사용하는 것을 권장합니다.
@@ -2003,18 +2101,31 @@ VLM 서비스 상태 확인
       "id": 1,
       "user_message": "근정전에 대해 알려줘",
       "ai_response": "근정전은 경복궁의 정전으로...",
+      "image_url": null,
       "created_at": "2024-01-01T12:00:00Z"
     },
     {
       "id": 2,
       "user_message": "그럼 사정전은?",
       "ai_response": "사정전은...",
+      "image_url": null,
       "created_at": "2024-01-01T12:05:00Z"
     }
   ],
   "count": 2
 }
 ```
+
+**Notes:**
+- `function_type`이 `route_recommend`인 경우, `chats` 배열의 각 항목에 다음 필드가 추가로 포함될 수 있습니다:
+  - `title`: 세션 제목
+  - `selected_theme`: 선택된 테마
+  - `selected_districts`: 선택된 자치구 목록
+  - `include_cart`: 장바구니 포함 여부
+  - `quest_step`: 퀘스트 단계
+  - `prompt_step_text`: 프롬프트 단계 텍스트
+  - `options`: 옵션 정보 (예: `{"quest_ids": [1, 2, 3, 4]}`)
+- `function_type`이 `vlm_chat`인 경우, `image_url` 필드가 포함됩니다
 
 ---
 
@@ -2032,7 +2143,7 @@ VLM 서비스 상태 확인
 ```json
 {
   "user_message": "경복궁 근정전에 대해 알려줘",
-  "language": "ko",
+  "language": "en",
   "prefer_url": false,
   "enable_tts": true,
   "chat_session_id": "uuid-optional"
@@ -2080,7 +2191,7 @@ VLM 서비스 상태 확인
   "quest_id": 1,                    // 필수: Quest ID (해당 Quest의 데이터만 사용)
   "user_message": "이 장소의 역사를 알려줘",
   "landmark": "경복궁",              // 선택적: 장소 이름
-  "language": "ko",                  // 선택적: 언어 (기본: "en")
+  "language": "en",                  // 선택적: 언어 (기본: "en")
   "prefer_url": false,               // 선택적: TTS URL 선호 여부
   "enable_tts": true,                // 선택적: TTS 활성화 여부
   "chat_session_id": "uuid-optional" // 선택적: 채팅 세션 ID
@@ -2130,7 +2241,7 @@ VLM 서비스 상태 확인
   "quest_id": 1,                    // 필수: Quest ID (해당 Quest의 데이터만 사용)
   "image": "base64_encoded_image",  // 필수: base64 인코딩된 이미지
   "user_message": "이 장소가 뭐야?", // 선택적: 사용자 메시지
-  "language": "ko",                  // 선택적: 언어 (기본: "en")
+  "language": "en",                  // 선택적: 언어 (기본: "en")
   "prefer_url": false,               // 선택적: TTS URL 선호 여부
   "enable_tts": true,                // 선택적: TTS 활성화 여부
   "chat_session_id": "uuid-optional" // 선택적: 채팅 세션 ID
@@ -2250,12 +2361,21 @@ STT + TTS 통합 엔드포인트
   "quests": [
     {
       "id": 1,
+      "place_id": "13ac5471-b78b-4640-b3ff-e2e63d9055ed",
       "name": "Gyeongbokgung Palace",
+      "title": null,
       "description": "...",
       "category": "Historic Site",
       "latitude": 37.579617,
       "longitude": 126.977041,
       "reward_point": 100,
+      "points": 10,
+      "difficulty": "easy",
+      "is_active": true,
+      "completion_count": 0,
+      "created_at": "2025-11-22T10:14:30.222474",
+      "district": "Jongno-gu",
+      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
       "distance_from_start": 1.5,
       "recommendation_score": 0.85,
       "score_breakdown": {
@@ -2268,13 +2388,30 @@ STT + TTS 통합 엔드포인트
     },
     {
       "id": 2,
+      "place_id": "23ac5471-b78b-4640-b3ff-e2e63d9055ee",
       "name": "N Seoul Tower",
+      "title": null,
       "description": "...",
       "category": "Attractions",
       "latitude": 37.551169,
       "longitude": 126.988227,
       "reward_point": 150,
-      "distance_from_start": 2.3
+      "points": 10,
+      "difficulty": "easy",
+      "is_active": true,
+      "completion_count": 0,
+      "created_at": "2025-11-22T10:14:30.222474",
+      "district": "Yongsan-gu",
+      "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB987.webp",
+      "distance_from_start": 2.3,
+      "recommendation_score": 0.75,
+      "score_breakdown": {
+        "category": 0.9,
+        "distance": 0.8,
+        "diversity": 0.7,
+        "popularity": 0.6,
+        "reward": 0.5
+      }
     }
   ],
   "count": 4,
@@ -2589,6 +2726,38 @@ STT + TTS 통합 엔드포인트
 - 시간순으로 정렬되어 반환됩니다 (오래된 것부터)
 - `interest_type`이 `location_tracking`인 로그만 조회됩니다
 - 날짜 필터를 사용하면 해당 기간의 데이터만 조회됩니다
+
+---
+
+## General Endpoints
+
+### GET /
+
+API 루트 엔드포인트
+
+**Response:**
+
+```json
+{
+  "message": "Quest of Seoul API",
+  "version": "1.0.0",
+  "status": "active"
+}
+```
+
+---
+
+### GET /health
+
+서비스 상태 확인
+
+**Response:**
+
+```json
+{
+  "status": "healthy"
+}
+```
 
 ---
 
