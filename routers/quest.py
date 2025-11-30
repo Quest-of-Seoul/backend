@@ -37,6 +37,10 @@ class QuestProgressRequest(BaseModel):
 
 class QuestStartRequest(BaseModel):
     quest_id: int
+    latitude: Optional[float] = None  # 사용자 현재 위치 (위도)
+    longitude: Optional[float] = None  # 사용자 현재 위치 (경도)
+    start_latitude: Optional[float] = None  # 출발 위치 (위도)
+    start_longitude: Optional[float] = None  # 출발 위치 (경도)
 
 
 class QuestQuizAnswerRequest(BaseModel):
@@ -214,6 +218,21 @@ async def start_quest(request: QuestStartRequest, user_id: str = Depends(get_cur
             "quest_id": request.quest_id,
             "status": status
         }).execute()
+
+        # 위치 정보 수집 (1km 이내일 때만)
+        if request.latitude and request.longitude:
+            from services.location_tracking import log_location_data
+            log_location_data(
+                user_id=user_id,
+                quest_id=request.quest_id,
+                place_id=quest.get("place_id"),
+                user_latitude=request.latitude,
+                user_longitude=request.longitude,
+                start_latitude=request.start_latitude,
+                start_longitude=request.start_longitude,
+                interest_type="quest_start",
+                treasure_hunt_count=0
+            )
 
         place = quest.get("place")
         response = {

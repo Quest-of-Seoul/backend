@@ -885,6 +885,38 @@ COMMENT ON COLUMN places.metadata IS '상세 메타데이터 (JSONB): tour_api, 
 COMMENT ON COLUMN places.images IS '이미지 URL 배열 (JSONB)';
 COMMENT ON COLUMN places.district IS '자치구 (주소에서 정규식으로 추출: 예: 종로구, 강남구)';
 
+-- Anonymous Location Logs Table (익명화된 위치 정보 수집)
+CREATE TABLE IF NOT EXISTS anonymous_location_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    anonymous_user_id VARCHAR(64) NOT NULL,  -- 해시된 사용자 ID (SHA-256)
+    quest_id INTEGER REFERENCES quests(id) ON DELETE SET NULL,
+    place_id UUID REFERENCES places(id) ON DELETE SET NULL,
+    user_latitude DECIMAL(10, 8),  -- 사용자 현재 위치 (위도)
+    user_longitude DECIMAL(11, 8),  -- 사용자 현재 위치 (경도)
+    start_latitude DECIMAL(10, 8),  -- 출발 위치 (위도)
+    start_longitude DECIMAL(11, 8),  -- 출발 위치 (경도)
+    distance_from_quest_km DECIMAL(8, 3),  -- 퀘스트 장소로부터의 거리 (km)
+    district VARCHAR(50),  -- 자치구 (places.district 참조)
+    interest_type VARCHAR(50),  -- 관심 유형: quest_start, quest_view, route_recommend, image_similarity 등
+    treasure_hunt_count INTEGER DEFAULT 0,  -- 보물 찾기 횟수
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_anonymous_location_logs_anonymous_user_id ON anonymous_location_logs(anonymous_user_id);
+CREATE INDEX idx_anonymous_location_logs_quest_id ON anonymous_location_logs(quest_id);
+CREATE INDEX idx_anonymous_location_logs_place_id ON anonymous_location_logs(place_id);
+CREATE INDEX idx_anonymous_location_logs_district ON anonymous_location_logs(district);
+CREATE INDEX idx_anonymous_location_logs_interest_type ON anonymous_location_logs(interest_type);
+CREATE INDEX idx_anonymous_location_logs_created_at ON anonymous_location_logs(created_at);
+CREATE INDEX idx_anonymous_location_logs_quest_district ON anonymous_location_logs(quest_id, district);
+CREATE INDEX idx_anonymous_location_logs_created_district ON anonymous_location_logs(created_at, district);
+
+COMMENT ON TABLE anonymous_location_logs IS '익명화된 위치 정보 수집 로그 (지자체/상권 마케팅 데이터용)';
+COMMENT ON COLUMN anonymous_location_logs.anonymous_user_id IS 'SHA-256 해시된 사용자 ID (익명화)';
+COMMENT ON COLUMN anonymous_location_logs.distance_from_quest_km IS '퀘스트 장소로부터의 거리 (1km 이내만 수집)';
+COMMENT ON COLUMN anonymous_location_logs.interest_type IS '관심 유형: quest_start(퀘스트 시작), quest_view(퀘스트 조회), route_recommend(경로 추천), image_similarity(이미지 유사도)';
+
 -- Update table statistics for query optimization
 ANALYZE places;
 ANALYZE quests;
+ANALYZE anonymous_location_logs;

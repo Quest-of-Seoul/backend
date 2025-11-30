@@ -1529,6 +1529,20 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         except Exception as db_error:
             logger.warning(f"Failed to save chat log: {db_error}")
         
+        # 위치 정보 수집 (경로 추천 관심도)
+        if recommended_quests:
+            from services.location_tracking import log_route_recommendation
+            quest_ids = [q.get("id") for q in recommended_quests if q.get("id")]
+            if quest_ids:
+                log_route_recommendation(
+                    user_id=user_id,
+                    recommended_quest_ids=quest_ids,
+                    user_latitude=request.latitude,
+                    user_longitude=request.longitude,
+                    start_latitude=request.start_latitude,
+                    start_longitude=request.start_longitude
+                )
+        
         logger.info(f"Recommended {len(recommended_quests)} quests")
         
         return {

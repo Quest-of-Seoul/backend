@@ -89,16 +89,22 @@ def format_quest_response_with_place(
 class RecommendRequest(BaseModel):
     image: Optional[str] = None  # 단일 이미지 (하위 호환성)
     images: Optional[List[str]] = None  # 다중 이미지 (1개 또는 3개)
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    radius_km: float = 5.0
+    latitude: Optional[float] = None  # 현재 위치 (거리 계산용)
+    longitude: Optional[float] = None  # 현재 위치 (거리 계산용)
+    start_latitude: Optional[float] = None  # 출발 위치 (정렬 기준)
+    start_longitude: Optional[float] = None  # 출발 위치 (정렬 기준)
+    radius_km: float = 5.0  # 사용 안 함 (하위 호환성 유지)
     limit: int = 3  # 상위 3개 추천
     quest_only: bool = True
 
 
 @router.post("/similar-places")
 async def recommend_similar_places(request: RecommendRequest, user_id: str = Depends(get_current_user_id)):
-    """Image-based place recommendation with GPS filtering (supports 1 or 3 images)"""
+    """
+    Image-based place recommendation.
+    Results are sorted by distance from start location (or current location if start not provided).
+    Supports 1 or 3 images.
+    """
     try:
         logger.info(f"Recommendation: user={user_id}, GPS=({request.latitude}, {request.longitude})")
         
@@ -142,14 +148,16 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
             avg_embedding = embeddings[0]
         
         # 임계값 낮춤 (상위 3개 추천이므로)
-        match_threshold = 0.2  # 기존 0.3에서 0.2로 낮춤
+        match_threshold = 0.2
         
-        # 검색 실행
+        # 검색 실행 (GPS 필터링 제거, 이미지 유사도만으로 검색)
         from services.optimized_search import search_with_gps_filter
         results = search_with_gps_filter(
             embedding=avg_embedding,
             latitude=request.latitude,
             longitude=request.longitude,
+            start_latitude=request.start_latitude,
+            start_longitude=request.start_longitude,
             radius_km=request.radius_km,
             match_threshold=match_threshold,
             match_count=request.limit * 2,  # 더 많이 가져와서 DB 검증 후 필터링
@@ -215,10 +223,13 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
                 if quest.get("place_id") != place_id:
                     logger.warning(f"⚠ Mismatch! Quest {quest_id} has place_id={quest.get('place_id')}, but we searched for {place_id}")
                 
-                # 거리 계산
-                if request.latitude and request.longitude and recommendation_item.get("latitude") and recommendation_item.get("longitude"):
+                # 거리 계산 (출발 위치 우선, 없으면 현재 위치 사용)
+                anchor_lat = request.start_latitude if request.start_latitude is not None else request.latitude
+                anchor_lon = request.start_longitude if request.start_longitude is not None else request.longitude
+                
+                if anchor_lat and anchor_lon and recommendation_item.get("latitude") and recommendation_item.get("longitude"):
                     distance = haversine_distance(
-                        request.latitude, request.longitude,
+                        anchor_lat, anchor_lon,
                         recommendation_item["latitude"], recommendation_item["longitude"]
                     )
                     recommendation_item["distance_km"] = round(distance, 2)
@@ -231,9 +242,13 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
                 recommendation_item["longitude"] = float(place.get("longitude")) if place.get("longitude") else None
                 recommendation_item["reward_point"] = None
                 
-                if request.latitude and request.longitude and recommendation_item.get("latitude") and recommendation_item.get("longitude"):
+                # 거리 계산 (출발 위치 우선, 없으면 현재 위치 사용)
+                anchor_lat = request.start_latitude if request.start_latitude is not None else request.latitude
+                anchor_lon = request.start_longitude if request.start_longitude is not None else request.longitude
+                
+                if anchor_lat and anchor_lon and recommendation_item.get("latitude") and recommendation_item.get("longitude"):
                     distance = haversine_distance(
-                        request.latitude, request.longitude,
+                        anchor_lat, anchor_lon,
                         recommendation_item["latitude"], recommendation_item["longitude"]
                     )
                     recommendation_item["distance_km"] = round(distance, 2)
@@ -257,6 +272,10 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
             "recommendations": formatted_recommendations,
             "filter": {
                 "gps_enabled": request.latitude is not None,
+                "start_location": {
+                    "latitude": request.start_latitude,
+                    "longitude": request.start_longitude
+                } if request.start_latitude and request.start_longitude else None,
                 "radius_km": request.radius_km,
                 "quest_only": request.quest_only
             }
