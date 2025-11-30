@@ -1964,7 +1964,14 @@ VLM 서비스 상태 확인
 
 ### POST /ai-station/quest/rag-chat
 
+**AI Plus 챗** - 퀘스트 모드 맞춤형 여행 가이드 채팅
+
 퀘스트 모드 - 장소 메타데이터를 context로 사용하는 LLM 채팅. 세션은 자동 생성되며 히스토리에 **조회 전용**으로 저장됩니다.
+
+**핵심 원칙:**
+1. **Quest_id 기반 데이터 필터링**: 오직 해당 `quest_id`에 해당하는 DB 데이터만 사용합니다.
+2. **데이터 기반 답변**: Quest와 Place 테이블에서 가져온 실제 데이터만을 기반으로 답변합니다.
+3. **DB 분리 설계**: 추후 맞춤형 여행 가이드 고도화를 위해 Quest별로 별도의 RAG 데이터베이스나 벡터 스토어를 분리할 수 있도록 설계되었습니다.
 
 **Headers:**
 - `Authorization: Bearer <token>` (필수)
@@ -1973,12 +1980,13 @@ VLM 서비스 상태 확인
 
 ```json
 {
-  "quest_id": 1,
+  "quest_id": 1,                    // 필수: Quest ID (해당 Quest의 데이터만 사용)
   "user_message": "이 장소의 역사를 알려줘",
-  "language": "ko",
-  "prefer_url": false,
-  "enable_tts": true,
-  "chat_session_id": "uuid-optional"
+  "landmark": "경복궁",              // 선택적: 장소 이름
+  "language": "ko",                  // 선택적: 언어 (기본: "en")
+  "prefer_url": false,               // 선택적: TTS URL 선호 여부
+  "enable_tts": true,                // 선택적: TTS 활성화 여부
+  "chat_session_id": "uuid-optional" // 선택적: 채팅 세션 ID
 }
 ```
 
@@ -1996,14 +2004,24 @@ VLM 서비스 상태 확인
 ```
 
 **Notes:**
-- `quest_id`는 반드시 전달해야 하며, 서버가 해당 퀘스트/장소 설명을 context로 붙여 응답합니다.
-- 히스토리에 저장되지만 `is_read_only = true` 로 표시되므로 이어 쓰기는 불가합니다.
+- **Quest_id 필수**: `quest_id`는 반드시 전달해야 하며, 서버가 해당 퀘스트/장소 설명을 context로 붙여 응답합니다.
+- **데이터 필터링**: 오직 해당 `quest_id`에 연결된 Quest와 Place 데이터만 사용합니다. 다른 Quest나 Place의 데이터는 절대 사용하지 않습니다.
+- **히스토리 저장**: 히스토리에 저장되지만 `is_read_only = true` 로 표시되므로 이어 쓰기는 불가합니다.
+- **향후 RAG 검색**: 향후 RAG 검색을 추가할 경우에도 반드시 `quest_id` 또는 `place_id`로 필터링해야 합니다.
+- **DB 분리 설계**: 추후 고도화를 위해 Quest별로 독립적인 벡터 스토어 네임스페이스나 RAG 데이터베이스를 사용할 수 있도록 설계되었습니다.
 
 ---
 
 ### POST /ai-station/quest/vlm-chat
 
+**AI Plus 챗** - 퀘스트 모드 VLM 채팅
+
 퀘스트 모드 - VLM 채팅. 사용자가 업로드한 이미지를 분석하고, 현재 진행 중인 퀘스트 장소 정보와 결합하여 설명합니다. 결과는 히스토리에 **조회 전용**으로 저장됩니다.
+
+**핵심 원칙:**
+1. **Quest_id 기반 데이터 필터링**: 오직 해당 `quest_id`에 해당하는 DB 데이터만 사용합니다.
+2. **데이터 기반 답변**: Quest와 Place 테이블에서 가져온 실제 데이터만을 기반으로 이미지 분석 및 답변을 수행합니다.
+3. **DB 분리 설계**: 추후 맞춤형 여행 가이드 고도화를 위해 Quest별로 별도의 RAG 데이터베이스나 벡터 스토어를 분리할 수 있도록 설계되었습니다.
 
 **Headers:**
 - `Authorization: Bearer <token>` (필수)
@@ -2012,13 +2030,13 @@ VLM 서비스 상태 확인
 
 ```json
 {
-  "quest_id": 1,
-  "image": "base64_encoded_image",
-  "user_message": "이 장소가 뭐야?",
-  "language": "ko",
-  "prefer_url": false,
-  "enable_tts": true,
-  "chat_session_id": "uuid-optional"
+  "quest_id": 1,                    // 필수: Quest ID (해당 Quest의 데이터만 사용)
+  "image": "base64_encoded_image",  // 필수: base64 인코딩된 이미지
+  "user_message": "이 장소가 뭐야?", // 선택적: 사용자 메시지
+  "language": "ko",                  // 선택적: 언어 (기본: "en")
+  "prefer_url": false,               // 선택적: TTS URL 선호 여부
+  "enable_tts": true,                // 선택적: TTS 활성화 여부
+  "chat_session_id": "uuid-optional" // 선택적: 채팅 세션 ID
 }
 ```
 
@@ -2041,8 +2059,12 @@ VLM 서비스 상태 확인
 ```
 
 **Notes:**
-- `quest_id`로 전달된 퀘스트 정보를 context로 첨부하여, 사용자가 찍은 이미지가 해당 장소와 어떻게 연결되는지 안내합니다.
-- 히스토리에서는 `function_type = vlm_chat`, `mode = quest`, `is_read_only = true`로 관리됩니다.
+- **Quest_id 필수**: `quest_id`는 반드시 전달해야 하며, 해당 퀘스트 정보를 context로 첨부하여 이미지 분석을 수행합니다.
+- **데이터 필터링**: 오직 해당 `quest_id`에 연결된 Quest와 Place 데이터만 사용합니다. 다른 Quest나 Place의 데이터는 절대 사용하지 않습니다.
+- **이미지 분석**: 사용자가 찍은 이미지가 해당 장소와 어떻게 연결되는지 Quest 데이터를 기반으로 안내합니다.
+- **히스토리 저장**: 히스토리에서는 `function_type = vlm_chat`, `mode = quest`, `is_read_only = true`로 관리됩니다.
+- **향후 RAG 검색**: 향후 RAG 검색을 추가할 경우에도 반드시 `quest_id` 또는 `place_id`로 필터링해야 합니다.
+- **DB 분리 설계**: 추후 고도화를 위해 Quest별로 독립적인 벡터 스토어 네임스페이스나 RAG 데이터베이스를 사용할 수 있도록 설계되었습니다.
 
 ---
 
@@ -2093,17 +2115,17 @@ STT + TTS 통합 엔드포인트
 ```json
 {
   "preferences": {
-    "theme": "역사유적 탐방",
-    "category": "역사유적",
-    "difficulty": "easy",
-    "duration": "half_day",
-    "districts": ["Jongno-gu"]
+    "theme": ["Culture", "History", "Food"],  // 다중 선택 가능 (3~4개 권장), 단일 선택도 지원: "Culture"
+    "category": "역사유적",                    // 선택적: 카테고리 정보
+    "difficulty": "easy",                      // 선택적: 난이도
+    "duration": "half_day",                    // 선택적: 소요 시간
+    "districts": ["Jongno-gu", "Gangnam-gu"]  // 다중 선택 가능
   },
-  "must_visit_place_id": "place-001",
-  "latitude": 37.5665,
-  "longitude": 126.9780,
-  "start_latitude": 37.5665,
-  "start_longitude": 126.9780
+  "must_visit_place_id": "place-001",         // 선택적: 필수 방문 장소 ID
+  "latitude": 37.5665,                        // 선택적: 현재 GPS 위도
+  "longitude": 126.9780,                       // 선택적: 현재 GPS 경도
+  "start_latitude": 37.5665,                  // 선택적: 출발 지점 위도 (서울역, 강남역 등)
+  "start_longitude": 126.9780                 // 선택적: 출발 지점 경도
 }
 ```
 
@@ -2111,10 +2133,15 @@ STT + TTS 통합 엔드포인트
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| preferences | object | 필수 | 사용자 취향 정보 (theme, category, districts 등) |
-| must_visit_place_id | string | 선택 | 필수 방문 장소 ID |
-| latitude | float | 선택 | 현재 GPS 위도 (거리 계산용) |
-| longitude | float | 선택 | 현재 GPS 경도 (거리 계산용) |
+| preferences | object | 필수 | 사용자 취향 정보 |
+| preferences.theme | string \| array | 선택 | 테마 (다중 선택 가능: `["Culture", "History", "Food"]`, 단일 선택도 지원: `"Culture"`) |
+| preferences.category | string \| object | 선택 | 카테고리 정보 |
+| preferences.districts | array | 선택 | 선호하는 구/지역 리스트 (다중 선택 가능) |
+| preferences.difficulty | string | 선택 | 난이도 (easy, medium, hard) |
+| preferences.duration | string | 선택 | 소요 시간 (half_day, full_day 등) |
+| must_visit_place_id | string | 선택 | 필수 방문 장소 ID (출발 위치 기준 거리순으로 자연스럽게 배치) |
+| latitude | float | 선택 | 현재 GPS 위도 (거리 계산용, 출발 지점 미지정 시 사용) |
+| longitude | float | 선택 | 현재 GPS 경도 (거리 계산용, 출발 지점 미지정 시 사용) |
 | start_latitude | float | 선택 | 출발 지점 위도 (지정 시 사용, 없으면 latitude 사용) |
 | start_longitude | float | 선택 | 출발 지점 경도 (지정 시 사용, 없으면 longitude 사용) |
 
@@ -2159,12 +2186,17 @@ STT + TTS 통합 엔드포인트
 ```
 
 **Notes:**
-- `preferences.theme` 또는 `preferences.category`가 세션 제목으로 사용됨
+- `preferences.theme` 또는 `preferences.category`가 세션 제목으로 사용됨 (theme이 리스트인 경우 첫 번째 테마 사용)
 - `is_read_only: true`로 저장되어 수정 불가
+- **테마 다중 선택**: `theme`을 리스트로 전달하면 여러 테마 중 하나라도 매칭되면 높은 점수 부여 (3~4개 권장)
 - **출발 지점 기준 정렬**: `start_latitude`와 `start_longitude`가 지정되면 해당 지점 기준으로 가까운 순 정렬, 없으면 `latitude`와 `longitude` 사용
+- **필수 방문 장소**: `must_visit_place_id`가 지정되면 항상 추천 결과에 포함되며, 출발 위치 기준 거리순으로 자연스럽게 배치됨 (1~4번째 중 적절한 위치)
 - **야경 특별 장소**: 마지막 장소(4번째)는 자동으로 야경 특별 장소로 추천됩니다 (metadata, description, name에서 야경 관련 키워드 검색)
 - **점수 계산**: 각 퀘스트는 카테고리 매칭(30%), 거리(25%), 다양성(20%), 인기도(15%), 포인트(10%) 가중치로 종합 점수를 계산합니다
+  - 테마 다중 선택 시 여러 테마 중 가장 높은 매칭 점수를 사용
 - **거리 정보**: `distance_from_start`는 출발 지점으로부터의 거리(km)입니다
+- **중복 체크**: `place_id` 기준으로 중복된 장소는 제외됩니다
+- **최대 4개 제한**: 추천 결과는 최대 4개 퀘스트로 제한됩니다
 
 ---
 

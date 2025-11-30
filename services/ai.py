@@ -189,9 +189,23 @@ def generate_route_recommendation(
             quest_info_list.append(quest_info)
         
         # Organize preference information
+        # theme 처리 (다중 선택 지원)
         theme = preferences.get("theme") or preferences.get("category") or "Seoul Travel"
-        if isinstance(theme, dict):
-            theme = theme.get("name", "Seoul Travel")
+        if isinstance(theme, list):
+            # 리스트인 경우: ["Culture", "History", "Food"] 등
+            theme_list = []
+            for t in theme:
+                if isinstance(t, dict):
+                    theme_list.append(t.get("name", ""))
+                elif isinstance(t, str):
+                    theme_list.append(t)
+            theme_str = ", ".join([t for t in theme_list if t]) or "Seoul Travel"
+        elif isinstance(theme, dict):
+            theme_str = theme.get("name", "Seoul Travel")
+        elif isinstance(theme, str):
+            theme_str = theme
+        else:
+            theme_str = "Seoul Travel"
         
         districts = preferences.get("districts") or []
         if isinstance(districts, list) and districts:
@@ -202,7 +216,7 @@ def generate_route_recommendation(
         prompt = f"""You are a Seoul travel expert. Recommend an optimal travel itinerary based on user preferences.
 
 [User Preferences]
-- Theme: {theme}
+- Theme: {theme_str}
 - Preferred Districts: {districts_str}
 - Completed Quests: {len(completed_quest_ids)}
 
