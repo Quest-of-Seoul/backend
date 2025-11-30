@@ -1119,12 +1119,12 @@ VLM 서비스 상태 확인
 
 ### POST /recommend/similar-places
 
-이미지 기반 장소 추천
+이미지 기반 장소 추천 (다중 이미지 지원: 1개 또는 3개)
 
 **Headers:**
 - `Authorization: Bearer <token>` (필수)
 
-**Request Body:**
+**Request Body (단일 이미지):**
 
 ```json
 {
@@ -1132,7 +1132,24 @@ VLM 서비스 상태 확인
   "latitude": 37.5796,
   "longitude": 126.9770,
   "radius_km": 5.0,
-  "limit": 5,
+  "limit": 3,
+  "quest_only": true
+}
+```
+
+**Request Body (다중 이미지):**
+
+```json
+{
+  "images": [
+    "base64_encoded_image_1",
+    "base64_encoded_image_2",
+    "base64_encoded_image_3"
+  ],
+  "latitude": 37.5796,
+  "longitude": 126.9770,
+  "radius_km": 5.0,
+  "limit": 3,
   "quest_only": true
 }
 ```
@@ -1141,12 +1158,15 @@ VLM 서비스 상태 확인
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| image | string | 필수 | Base64 인코딩 이미지 |
+| image | string | 선택* | Base64 인코딩 단일 이미지 (`images`가 없을 때 필수) |
+| images | array[string] | 선택* | Base64 인코딩 이미지 배열 (1개 또는 3개, `image`가 없을 때 필수) |
 | latitude | float | 선택 | 위도 |
 | longitude | float | 선택 | 경도 |
 | radius_km | float | 선택 | 검색 반경 (기본: 5.0) |
-| limit | integer | 선택 | 결과 개수 (기본: 5) |
+| limit | integer | 선택 | 결과 개수 (기본: 3, 상위 3개 추천) |
 | quest_only | boolean | 선택 | 퀘스트 장소만 (기본: true) |
+
+**Note:** `image` 또는 `images` 중 하나는 반드시 제공해야 합니다.
 
 **Response:**
 
@@ -1187,6 +1207,9 @@ VLM 서비스 상태 확인
 - `quest_id`는 해당 place에 연결된 활성 quest가 있을 때만 포함됩니다
 - `distance_km`는 `latitude`와 `longitude`가 제공될 때만 계산됩니다
 - Quest 정보가 없으면 Place 정보만 사용됩니다
+- **다중 이미지 지원**: `images` 배열에 1개 또는 최대 3개 이미지를 제공할 수 있습니다. 3개 이미지일 경우 평균 임베딩을 사용하여 더 정확한 추천을 제공합니다.
+- **DB 검증**: Pinecone에서 반환된 결과가 실제 DB에 존재하는지 검증하여, 누락된 장소는 제외하고 실제 존재하는 장소만 추천합니다.
+- **임계값**: 유사도 임계값이 0.2로 낮춰져 상위 3개 추천에 최적화되었습니다.
 
 ---
 
@@ -1935,6 +1958,7 @@ VLM 서비스 상태 확인
 - `chat_session_id`가 없으면 새 세션 생성
 - `chat_session_id`가 있으면 기존 세션에 추가
 - 첫 번째 메시지일 경우 `user_message`가 세션 제목으로 저장됨
+- **특정 장소 환영 메시지**: RAG 검색 결과에서 첫 번째 장소를 감지하여, 해당 장소에 대한 환영 메시지를 생성합니다 (예: "경복궁에 오신 것을 환영합니다")
 
 ---
 
@@ -2058,6 +2082,8 @@ STT + TTS 통합 엔드포인트
 - 히스토리에 저장됨 (보기 전용)
 - 테마가 세션 제목으로 사용됨
 - 다시 들어와서 수정 불가, 보기만 가능
+- 출발 지점 지정 또는 현재 GPS 기준으로 가까운 순 정렬
+- 마지막 장소는 야경 특별 장소로 추천
 
 **Headers:**
 - `Authorization: Bearer <token>` (필수)
@@ -2070,13 +2096,27 @@ STT + TTS 통합 엔드포인트
     "theme": "역사유적 탐방",
     "category": "역사유적",
     "difficulty": "easy",
-    "duration": "half_day"
+    "duration": "half_day",
+    "districts": ["Jongno-gu"]
   },
   "must_visit_place_id": "place-001",
   "latitude": 37.5665,
-  "longitude": 126.9780
+  "longitude": 126.9780,
+  "start_latitude": 37.5665,
+  "start_longitude": 126.9780
 }
 ```
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| preferences | object | 필수 | 사용자 취향 정보 (theme, category, districts 등) |
+| must_visit_place_id | string | 선택 | 필수 방문 장소 ID |
+| latitude | float | 선택 | 현재 GPS 위도 (거리 계산용) |
+| longitude | float | 선택 | 현재 GPS 경도 (거리 계산용) |
+| start_latitude | float | 선택 | 출발 지점 위도 (지정 시 사용, 없으면 latitude 사용) |
+| start_longitude | float | 선택 | 출발 지점 경도 (지정 시 사용, 없으면 longitude 사용) |
 
 **Response:**
 
@@ -2092,7 +2132,25 @@ STT + TTS 통합 엔드포인트
       "latitude": 37.579617,
       "longitude": 126.977041,
       "reward_point": 100,
-      "distance_km": 1.5
+      "distance_from_start": 1.5,
+      "recommendation_score": 0.85,
+      "score_breakdown": {
+        "category": 1.0,
+        "distance": 0.9,
+        "diversity": 0.8,
+        "popularity": 0.7,
+        "reward": 0.5
+      }
+    },
+    {
+      "id": 2,
+      "name": "N Seoul Tower",
+      "description": "...",
+      "category": "Attractions",
+      "latitude": 37.551169,
+      "longitude": 126.988227,
+      "reward_point": 150,
+      "distance_from_start": 2.3
     }
   ],
   "count": 4,
@@ -2103,6 +2161,10 @@ STT + TTS 통합 엔드포인트
 **Notes:**
 - `preferences.theme` 또는 `preferences.category`가 세션 제목으로 사용됨
 - `is_read_only: true`로 저장되어 수정 불가
+- **출발 지점 기준 정렬**: `start_latitude`와 `start_longitude`가 지정되면 해당 지점 기준으로 가까운 순 정렬, 없으면 `latitude`와 `longitude` 사용
+- **야경 특별 장소**: 마지막 장소(4번째)는 자동으로 야경 특별 장소로 추천됩니다 (metadata, description, name에서 야경 관련 키워드 검색)
+- **점수 계산**: 각 퀘스트는 카테고리 매칭(30%), 거리(25%), 다양성(20%), 인기도(15%), 포인트(10%) 가중치로 종합 점수를 계산합니다
+- **거리 정보**: `distance_from_start`는 출발 지점으로부터의 거리(km)입니다
 
 ---
 

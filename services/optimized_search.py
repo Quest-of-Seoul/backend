@@ -14,7 +14,7 @@ def search_with_gps_filter(
     latitude: Optional[float] = None,
     longitude: Optional[float] = None,
     radius_km: float = 5.0,
-    match_threshold: float = 0.65,
+    match_threshold: float = 0.2,  # 임계값 낮춤 (상위 3개 추천이므로)
     match_count: int = 5,
     quest_only: bool = False
 ) -> List[Dict]:
@@ -149,7 +149,7 @@ def search_similar_with_optimization(
     latitude: Optional[float] = None,
     longitude: Optional[float] = None,
     radius_km: float = 5.0,
-    match_threshold: float = 0.65,
+    match_threshold: float = 0.2,  # 임계값 낮춤 (상위 3개 추천이므로)
     match_count: int = 5,
     quest_only: bool = False
 ) -> List[Dict]:

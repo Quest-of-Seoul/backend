@@ -61,6 +61,8 @@ class RouteRecommendRequest(BaseModel):
     must_visit_place_id: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    start_latitude: Optional[float] = None  # 출발 지점 위도 (지정 시 사용)
+    start_longitude: Optional[float] = None  # 출발 지점 경도 (지정 시 사용)
 
 
 def format_time_ago(created_at_str: str) -> str:
@@ -366,8 +368,11 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
             ).execute()
             
             context = ""
+            detected_place_name = None  # 특정 장소 이름 추출
             if places_result.data:
                 place_names = [p.get("name", "") for p in places_result.data[:3]]
+                if place_names:
+                    detected_place_name = place_names[0]  # 첫 번째 장소를 주요 장소로 사용
                 context = f"관련 장소: {', '.join(place_names)}\n\n"
         else:
             # Pinecone vector search
@@ -381,11 +386,16 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
             
             # Build context
             context_parts = []
+            detected_place_name = None  # 특정 장소 이름 추출
             if similar_places:
                 context_parts.append("Related Places Information:")
                 for idx, sp in enumerate(similar_places[:3], 1):
                     place = sp.get("place")
                     if place:
+                        # 첫 번째 장소를 주요 장소로 사용
+                        if idx == 1 and place.get("name"):
+                            detected_place_name = place['name']
+                        
                         place_info = []
                         if place.get("name"):
                             place_info.append(f"Name: {place['name']}")
@@ -414,6 +424,8 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
                 
                 if places_result.data:
                     place_names = [p.get("name", "") for p in places_result.data[:3]]
+                    if place_names:
+                        detected_place_name = place_names[0]  # 첫 번째 장소를 주요 장소로 사용
                     context = f"Related Places: {', '.join(place_names)}\n\n"
                 else:
                     context = ""
@@ -443,13 +455,16 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
             except Exception as hist_error:
                 logger.warning(f"Failed to load chat history: {hist_error}")
         
+        # 특정 장소 이름이 있으면 해당 장소로, 없으면 "Seoul Travel"로 설정
+        landmark_name = detected_place_name if detected_place_name else "Seoul Travel"
+        
         # Generate AI response
         full_prompt = f"""{context}{chat_history}Question: {request.user_message}
 
 Please provide a friendly and helpful response based on the above information."""
         
         ai_response = generate_docent_message(
-            landmark="Seoul Travel",
+            landmark=landmark_name,
             user_message=full_prompt,
             language="en"
         )
@@ -1123,10 +1138,79 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             
             scored_quests.append(quest)
         
-        # 5. 종합 점수로 정렬
-        scored_quests.sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
+        # 5. 출발 지점 결정 (지정된 출발지점 또는 현재 GPS 위치)
+        start_lat = request.start_latitude or request.latitude
+        start_lon = request.start_longitude or request.longitude
         
-        # 6. AI 기반 추천 또는 점수 기반 추천
+        # 6. 야경 특별 장소 찾기 (마지막 장소로 사용)
+        def is_night_view_place(quest: dict) -> bool:
+            """야경 특별 장소인지 확인"""
+            place = quest.get("places")
+            if isinstance(place, list) and len(place) > 0:
+                place = place[0]
+            
+            if not isinstance(place, dict):
+                return False
+            
+            # metadata에서 야경 관련 키워드 확인
+            metadata = place.get("metadata", {})
+            if isinstance(metadata, dict):
+                metadata_str = str(metadata).lower()
+                if any(keyword in metadata_str for keyword in ["night_view", "night_scene", "night_viewing", "야경", "야경명소"]):
+                    return True
+            
+            # description에서 야경 관련 키워드 확인
+            description = (quest.get("description") or place.get("description") or "").lower()
+            if any(keyword in description for keyword in ["night view", "night scene", "야경", "야경명소", "야경 포인트"]):
+                return True
+            
+            # name에서 야경 관련 키워드 확인
+            name = (quest.get("name") or place.get("name") or "").lower()
+            if any(keyword in name for keyword in ["night view", "야경"]):
+                return True
+            
+            return False
+        
+        # 야경 장소 분리
+        night_view_quests = [q for q in scored_quests if is_night_view_place(q)]
+        regular_quests = [q for q in scored_quests if not is_night_view_place(q)]
+        
+        # 7. 출발 지점 기준 거리 계산 및 정렬
+        if start_lat and start_lon:
+            def calculate_distance_from_start(quest: dict) -> float:
+                """출발 지점으로부터의 거리 계산"""
+                quest_lat = quest.get("latitude")
+                quest_lon = quest.get("longitude")
+                if not (quest_lat and quest_lon):
+                    return float('inf')
+                
+                R = 6371  # 지구 반지름 (km)
+                lat1_rad = math.radians(start_lat)
+                lat2_rad = math.radians(float(quest_lat))
+                delta_lat = math.radians(float(quest_lat) - start_lat)
+                delta_lon = math.radians(float(quest_lon) - start_lon)
+                
+                a = (math.sin(delta_lat / 2) ** 2 + 
+                     math.cos(lat1_rad) * math.cos(lat2_rad) * 
+                     math.sin(delta_lon / 2) ** 2)
+                c = 2 * math.asin(math.sqrt(a))
+                return R * c
+            
+            # 일반 퀘스트를 출발 지점 기준 거리순으로 정렬
+            for quest in regular_quests:
+                quest["distance_from_start"] = calculate_distance_from_start(quest)
+            regular_quests.sort(key=lambda x: (x.get("distance_from_start", float('inf')), -x.get("recommendation_score", 0)))
+            
+            # 야경 장소도 거리순 정렬
+            for quest in night_view_quests:
+                quest["distance_from_start"] = calculate_distance_from_start(quest)
+            night_view_quests.sort(key=lambda x: (x.get("distance_from_start", float('inf')), -x.get("recommendation_score", 0)))
+        else:
+            # GPS 정보가 없으면 점수순 정렬
+            regular_quests.sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
+            night_view_quests.sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
+        
+        # 8. AI 기반 추천 또는 점수 기반 추천
         use_ai_recommendation = os.getenv("USE_AI_ROUTE_RECOMMENDATION", "true").lower() == "true"
         
         if use_ai_recommendation and len(scored_quests) >= 4:
@@ -1152,13 +1236,25 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 else:
                     remaining_count = 4
                 
-                for quest in scored_quests[:remaining_count * 2]:
-                    if len(recommended_quests) >= 4:
+                # 일반 퀘스트에서 선택 (야경 장소 제외)
+                for quest in regular_quests[:remaining_count * 2]:
+                    if len(recommended_quests) >= remaining_count:
                         break
                     place_id = quest.get("place_id")
                     if any(rq.get("place_id") == place_id for rq in recommended_quests):
                         continue
                     recommended_quests.append(quest)
+                
+                # 마지막 장소는 야경 특별 장소로 (가능한 경우)
+                if night_view_quests and len(recommended_quests) < 4:
+                    for night_quest in night_view_quests:
+                        if len(recommended_quests) >= 4:
+                            break
+                        place_id = night_quest.get("place_id")
+                        if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                            continue
+                        recommended_quests.append(night_quest)
+                        break  # 야경 장소는 1개만 추가
                 
                 recommended_quests = recommended_quests[:4]
                 logger.info("Using score-based recommendation (AI fallback)")
@@ -1171,13 +1267,25 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             else:
                 remaining_count = 4
             
-            for quest in scored_quests[:remaining_count * 2]:
-                if len(recommended_quests) >= 4:
+            # 일반 퀘스트에서 선택 (야경 장소 제외)
+            for quest in regular_quests[:remaining_count * 2]:
+                if len(recommended_quests) >= remaining_count:
                     break
                 place_id = quest.get("place_id")
                 if any(rq.get("place_id") == place_id for rq in recommended_quests):
                     continue
                 recommended_quests.append(quest)
+            
+            # 마지막 장소는 야경 특별 장소로 (가능한 경우)
+            if night_view_quests and len(recommended_quests) < 4:
+                for night_quest in night_view_quests:
+                    if len(recommended_quests) >= 4:
+                        break
+                    place_id = night_quest.get("place_id")
+                    if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                        continue
+                    recommended_quests.append(night_quest)
+                    break  # 야경 장소는 1개만 추가
             
             recommended_quests = recommended_quests[:4]
             logger.info("Using score-based recommendation")

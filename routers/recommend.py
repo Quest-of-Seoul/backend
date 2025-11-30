@@ -6,6 +6,7 @@ from typing import Optional, List
 import base64
 import math
 import logging
+import numpy as np
 from datetime import datetime, timedelta
 
 from services.optimized_search import (
@@ -86,44 +87,103 @@ def format_quest_response_with_place(
 
 
 class RecommendRequest(BaseModel):
-    image: str
+    image: Optional[str] = None  # 단일 이미지 (하위 호환성)
+    images: Optional[List[str]] = None  # 다중 이미지 (1개 또는 3개)
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     radius_km: float = 5.0
-    limit: int = 5
+    limit: int = 3  # 상위 3개 추천
     quest_only: bool = True
 
 
 @router.post("/similar-places")
 async def recommend_similar_places(request: RecommendRequest, user_id: str = Depends(get_current_user_id)):
-    """Image-based place recommendation with GPS filtering"""
+    """Image-based place recommendation with GPS filtering (supports 1 or 3 images)"""
     try:
         logger.info(f"Recommendation: user={user_id}, GPS=({request.latitude}, {request.longitude})")
         
-        try:
-            image_bytes = base64.b64decode(request.image)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid base64: {str(e)}")
+        # 이미지 처리: images가 있으면 사용, 없으면 image 사용
+        image_list = []
+        if request.images:
+            if len(request.images) > 3:
+                raise HTTPException(status_code=400, detail="Maximum 3 images allowed")
+            image_list = request.images
+        elif request.image:
+            image_list = [request.image]
+        else:
+            raise HTTPException(status_code=400, detail="Either 'image' or 'images' must be provided")
         
-        results = search_similar_with_optimization(
-            image_bytes=image_bytes,
+        # 이미지 디코딩
+        image_bytes_list = []
+        for img_str in image_list:
+            try:
+                image_bytes = base64.b64decode(img_str)
+                image_bytes_list.append(image_bytes)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid base64 image: {str(e)}")
+        
+        # 다중 이미지 처리: 3개일 경우 평균 임베딩 사용
+        from services.embedding import generate_image_embedding
+        
+        embeddings = []
+        for img_bytes in image_bytes_list:
+            embedding = generate_image_embedding(img_bytes)
+            if embedding:
+                embeddings.append(embedding)
+        
+        if not embeddings:
+            raise HTTPException(status_code=400, detail="Failed to generate image embeddings")
+        
+        # 다중 이미지의 경우 평균 임베딩 계산
+        if len(embeddings) > 1:
+            avg_embedding = np.mean(embeddings, axis=0).tolist()
+            logger.info(f"Using average embedding from {len(embeddings)} images")
+        else:
+            avg_embedding = embeddings[0]
+        
+        # 임계값 낮춤 (상위 3개 추천이므로)
+        match_threshold = 0.2  # 기존 0.3에서 0.2로 낮춤
+        
+        # 검색 실행
+        from services.optimized_search import search_with_gps_filter
+        results = search_with_gps_filter(
+            embedding=avg_embedding,
             latitude=request.latitude,
             longitude=request.longitude,
             radius_km=request.radius_km,
-            match_threshold=0.3,
-            match_count=request.limit,
+            match_threshold=match_threshold,
+            match_count=request.limit * 2,  # 더 많이 가져와서 DB 검증 후 필터링
             quest_only=request.quest_only
         )
         
-        # 결과 포맷팅 (Quest 정보 포함)
+        # 결과 포맷팅 (Quest 정보 포함) 및 DB 검증
         formatted_recommendations = []
         db = get_db()
         
+        # 실제 DB에 존재하는 place_id만 필터링
+        valid_place_ids = set()
         for result in results:
             place = result.get("place", {})
             place_id = place.get("id")
             
             if not place_id:
+                continue
+            
+            # DB에서 실제 존재하는지 확인
+            place_check = db.table("places").select("id").eq("id", place_id).eq("is_active", True).limit(1).execute()
+            if place_check.data and len(place_check.data) > 0:
+                valid_place_ids.add(place_id)
+            else:
+                logger.warning(f"Place {place_id} not found in DB or inactive, skipping")
+        
+        logger.info(f"Valid places after DB verification: {len(valid_place_ids)}")
+        
+        # 유효한 place만 처리
+        for result in results:
+            place = result.get("place", {})
+            place_id = place.get("id")
+            
+            if not place_id or place_id not in valid_place_ids:
                 continue
             
             # 해당 Place에 연결된 Quest 찾기
