@@ -9,7 +9,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import docent, quest, reward, vlm, recommend, map, ai_station, auth, analytics
+from routers import docent, quest, reward, vlm, recommend, map, ai_station, auth, analytics, location
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,6 +69,10 @@ app = FastAPI(
         {
             "name": "Analytics",
             "description": "Location tracking analytics and reporting for marketing data"
+        },
+        {
+            "name": "Location",
+            "description": "Periodic location tracking and movement path history"
         }
     ]
 )
@@ -90,6 +94,7 @@ app.include_router(recommend.router, prefix="/recommend", tags=["Recommend - Pla
 app.include_router(map.router, prefix="/map", tags=["Map - Search & Filter"])
 app.include_router(ai_station.router, prefix="/ai-station", tags=["AI Station"])
 app.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
+app.include_router(location.router, prefix="/location", tags=["Location"])
 
 @app.get("/")
 async def root():

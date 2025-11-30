@@ -98,6 +98,10 @@ JWT Bearer 토큰 기반 인증을 사용합니다.
 - POST `/ai-station/quest/rag-chat` - 퀘스트 모드 채팅 (인증 필요)
 - POST `/ai-station/quest/vlm-chat` - 퀘스트 모드 VLM 채팅 (인증 필요)
 - POST `/ai-station/stt-tts` - STT + TTS 통합 (인증 필요)
+
+### Location (위치 추적)
+- POST `/location/track` - 주기적 위치 추적 (인증 필요)
+- GET `/location/track/history` - 이동 경로 조회 (인증 필요)
 - POST `/ai-station/route-recommend` - 여행 일정 추천 (인증 필요)
 
 ### Analytics (분석 및 통계)
@@ -2469,6 +2473,122 @@ STT + TTS 통합 엔드포인트
 - `total_quests`: 방문된 퀘스트 수 (중복 제거)
 - `total_districts`: 방문된 자치구 수 (중복 제거)
 - `avg_distance_km`: 평균 거리 (km)
+
+---
+
+## Location Tracking Endpoints
+
+### POST /location/track
+
+주기적인 위치 추적 (시간별 이동 경로 추적)
+
+**프론트엔드 구현 가이드:**
+- 앱이 포그라운드에 있을 때 주기적으로 호출 (권장: 30초~1분 간격)
+- 사용자가 위치 권한을 허용한 경우에만 호출
+- 배터리 최적화를 위해 이동 중일 때만 호출하는 것을 권장
+- 네트워크 오류 시 재시도 로직 구현 권장
+
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
+**Request Body:**
+
+```json
+{
+  "latitude": 37.5796,
+  "longitude": 126.9770,
+  "quest_id": 1,
+  "place_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| latitude | float | 필수 | 사용자 현재 위치 위도 (-90 ~ 90) |
+| longitude | float | 필수 | 사용자 현재 위치 경도 (-180 ~ 180) |
+| quest_id | integer | 선택 | 현재 진행 중인 퀘스트 ID |
+| place_id | string | 선택 | 현재 위치한 장소 ID (UUID) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "Location tracked successfully"
+}
+```
+
+**Status Codes:**
+- 200: 성공
+- 400: 잘못된 요청 (위도/경도 범위 초과 등)
+- 401: 인증 실패
+- 500: 서버 오류
+
+**Notes:**
+- 거리 제한 없이 모든 위치를 기록합니다
+- District는 자동으로 추출됩니다 (주변 장소 기반)
+- `interest_type`이 `location_tracking`으로 저장됩니다
+
+---
+
+### GET /location/track/history
+
+사용자의 이동 경로 조회 (시간순)
+
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| start_date | string | 선택 | 시작 날짜 (YYYY-MM-DD) |
+| end_date | string | 선택 | 종료 날짜 (YYYY-MM-DD) |
+| limit | integer | 선택 | 최대 조회 개수 (기본: 1000) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "count": 150,
+  "locations": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "latitude": 37.5796,
+      "longitude": 126.9770,
+      "quest_id": 1,
+      "place_id": "660e8400-e29b-41d4-a716-446655440001",
+      "district": "종로구",
+      "distance_from_quest_km": 0.15,
+      "created_at": "2024-01-01T12:00:00Z"
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440002",
+      "latitude": 37.5800,
+      "longitude": 126.9775,
+      "quest_id": 1,
+      "place_id": null,
+      "district": "종로구",
+      "distance_from_quest_km": 0.18,
+      "created_at": "2024-01-01T12:01:00Z"
+    }
+  ]
+}
+```
+
+**Status Codes:**
+- 200: 성공
+- 400: 잘못된 요청 (날짜 형식 오류 등)
+- 401: 인증 실패
+- 500: 서버 오류
+
+**Notes:**
+- 시간순으로 정렬되어 반환됩니다 (오래된 것부터)
+- `interest_type`이 `location_tracking`인 로그만 조회됩니다
+- 날짜 필터를 사용하면 해당 기간의 데이터만 조회됩니다
 
 ---
 

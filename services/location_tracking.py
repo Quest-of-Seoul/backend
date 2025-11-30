@@ -215,3 +215,155 @@ def log_route_recommendation(
             logger.error(f"Error logging route recommendation for quest {quest_id}: {e}", exc_info=True)
     
     return count
+
+
+def log_periodic_location(
+    user_id: str,
+    user_latitude: float,
+    user_longitude: float,
+    quest_id: Optional[int] = None,
+    place_id: Optional[str] = None
+) -> bool:
+    """
+    주기적인 위치 추적 (시간별 이동 경로 추적용)
+    거리 제한 없이 모든 위치를 기록
+    
+    Args:
+        user_id: 사용자 ID
+        user_latitude: 사용자 현재 위치 위도
+        user_longitude: 사용자 현재 위치 경도
+        quest_id: 현재 진행 중인 퀘스트 ID (선택)
+        place_id: 현재 위치한 장소 ID (선택)
+    
+    Returns:
+        수집 성공 여부
+    """
+    try:
+        db = get_db()
+        
+        # 익명화된 사용자 ID 생성
+        anonymous_user_id = anonymize_user_id(user_id)
+        
+        # District 추출 (주변 장소 기반 또는 reverse geocoding)
+        district = None
+        
+        # 1. place_id가 있으면 해당 장소의 district 사용
+        if place_id:
+            place_result = db.table("places").select("district").eq("id", place_id).single().execute()
+            if place_result.data:
+                district = place_result.data.get("district")
+        
+        # 2. place_id가 없고 quest_id가 있으면 퀘스트의 place_id로 district 조회
+        if not district and quest_id:
+            quest_result = db.table("quests").select("place_id").eq("id", quest_id).single().execute()
+            if quest_result.data:
+                quest_place_id = quest_result.data.get("place_id")
+                if quest_place_id:
+                    place_result = db.table("places").select("district").eq("id", quest_place_id).single().execute()
+                    if place_result.data:
+                        district = place_result.data.get("district")
+        
+        # 3. 주변 장소 기반으로 district 추정 (500m 이내)
+        if not district:
+            nearby_places = db.rpc(
+                "search_places_by_radius",
+                {
+                    "lat": float(user_latitude),
+                    "lon": float(user_longitude),
+                    "radius_km": 0.5,  # 500m
+                    "limit_count": 1
+                }
+            ).execute()
+            
+            if nearby_places.data and len(nearby_places.data) > 0:
+                # 주변 장소의 district 사용
+                nearby_place = nearby_places.data[0]
+                # address에서 district 추출
+                address = nearby_place.get("address", "")
+                if address:
+                    # 간단한 정규식으로 district 추출 시도
+                    import re
+                    match = re.search(r'([가-힣]+구)', address)
+                    if match:
+                        district = match.group(1)
+        
+        # 거리 계산 (quest_id가 있으면)
+        distance_from_quest_km = None
+        if quest_id:
+            quest_result = db.table("quests").select("latitude, longitude").eq("id", quest_id).single().execute()
+            if quest_result.data:
+                quest_lat = float(quest_result.data["latitude"])
+                quest_lon = float(quest_result.data["longitude"])
+                distance_from_quest_km = calculate_distance_km(
+                    user_latitude, user_longitude,
+                    quest_lat, quest_lon
+                )
+        
+        # 위치 정보 로그 저장
+        log_data = {
+            "anonymous_user_id": anonymous_user_id,
+            "quest_id": quest_id,
+            "place_id": place_id,
+            "user_latitude": float(user_latitude),
+            "user_longitude": float(user_longitude),
+            "start_latitude": None,  # 주기적 추적에서는 출발지 정보 없음
+            "start_longitude": None,
+            "distance_from_quest_km": round(distance_from_quest_km, 3) if distance_from_quest_km else None,
+            "district": district,
+            "interest_type": "location_tracking",  # 새로운 타입
+            "treasure_hunt_count": 0
+        }
+        
+        db.table("anonymous_location_logs").insert(log_data).execute()
+        
+        logger.debug(f"Periodic location log saved: user_id={user_id[:8]}..., lat={user_latitude}, lon={user_longitude}, district={district}")
+        return True
+    
+    except Exception as e:
+        logger.error(f"Error logging periodic location data: {e}", exc_info=True)
+        return False
+
+
+def get_user_location_history(
+    user_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 1000
+) -> list:
+    """
+    사용자의 이동 경로 조회 (시간순)
+    
+    Args:
+        user_id: 사용자 ID
+        start_date: 시작 날짜 (YYYY-MM-DD)
+        end_date: 종료 날짜 (YYYY-MM-DD)
+        limit: 최대 조회 개수
+    
+    Returns:
+        위치 로그 리스트 (시간순)
+    """
+    try:
+        db = get_db()
+        anonymous_user_id = anonymize_user_id(user_id)
+        
+        query = db.table("anonymous_location_logs") \
+            .select("*") \
+            .eq("anonymous_user_id", anonymous_user_id) \
+            .eq("interest_type", "location_tracking") \
+            .order("created_at", desc=False) \
+            .limit(limit)
+        
+        if start_date:
+            query = query.gte("created_at", start_date)
+        if end_date:
+            from datetime import datetime, timedelta
+            end_datetime = datetime.fromisoformat(end_date) + timedelta(days=1)
+            query = query.lt("created_at", end_datetime.isoformat())
+        
+        result = query.execute()
+        
+        return result.data if result.data else []
+    
+    except Exception as e:
+        logger.error(f"Error getting user location history: {e}", exc_info=True)
+        return []
