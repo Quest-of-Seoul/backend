@@ -2327,7 +2327,8 @@ STT + TTS 통합 엔드포인트
     "category": "역사유적",                    // 선택적: 카테고리 정보
     "difficulty": "easy",                      // 선택적: 난이도
     "duration": "half_day",                    // 선택적: 소요 시간
-    "districts": ["Jongno-gu", "Gangnam-gu"]  // 다중 선택 가능
+    "districts": ["Jongno-gu", "Gangnam-gu"], // 다중 선택 가능
+    "include_cart": false                      // 선택적: 장바구니의 첫 번째 퀘스트 포함 여부 (기본: false)
   },
   "must_visit_place_id": "place-001",         // 선택적: 필수 방문 장소 ID
   "latitude": 37.5665,                        // 선택적: 현재 GPS 위도
@@ -2347,6 +2348,7 @@ STT + TTS 통합 엔드포인트
 | preferences.districts | array | 선택 | 선호하는 구/지역 리스트 (다중 선택 가능) |
 | preferences.difficulty | string | 선택 | 난이도 (easy, medium, hard) |
 | preferences.duration | string | 선택 | 소요 시간 (half_day, full_day 등) |
+| preferences.include_cart | boolean | 선택 | 장바구니의 첫 번째 퀘스트 포함 여부 (기본: false) |
 | must_visit_place_id | string | 선택 | 필수 방문 장소 ID (출발 위치 기준 거리순으로 자연스럽게 배치) |
 | latitude | float | 선택 | 현재 GPS 위도 (거리 계산용, 출발 지점 미지정 시 사용) |
 | longitude | float | 선택 | 현재 GPS 경도 (거리 계산용, 출발 지점 미지정 시 사용) |
