@@ -215,4 +215,3 @@ def log_route_recommendation(
             logger.error(f"Error logging route recommendation for quest {quest_id}: {e}", exc_info=True)
     
     return count
-
