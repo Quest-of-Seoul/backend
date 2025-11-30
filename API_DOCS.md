@@ -100,6 +100,12 @@ JWT Bearer 토큰 기반 인증을 사용합니다.
 - POST `/ai-station/stt-tts` - STT + TTS 통합 (인증 필요)
 - POST `/ai-station/route-recommend` - 여행 일정 추천 (인증 필요)
 
+### Analytics (분석 및 통계)
+- GET `/analytics/location-stats/district` - 지자체별 위치 정보 통계 (인증 필요)
+- GET `/analytics/location-stats/quest` - 퀘스트별 방문 통계 (인증 필요)
+- GET `/analytics/location-stats/time` - 시간대별 통계 (인증 필요)
+- GET `/analytics/location-stats/summary` - 전체 요약 통계 (인증 필요)
+
 ---
 
 ## Authentication Endpoints
@@ -471,9 +477,23 @@ TTS 스트리밍
 
 ```json
 {
-  "quest_id": 1
+  "quest_id": 1,
+  "latitude": 37.5665,
+  "longitude": 126.9780,
+  "start_latitude": 37.5665,
+  "start_longitude": 126.9780
 }
 ```
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| quest_id | integer | 필수 | 퀘스트 ID |
+| latitude | float | 선택 | 사용자 현재 위치 위도 (위치 정보 수집용) |
+| longitude | float | 선택 | 사용자 현재 위치 경도 (위치 정보 수집용) |
+| start_latitude | float | 선택 | 출발 위치 위도 (위치 정보 수집용) |
+| start_longitude | float | 선택 | 출발 위치 경도 (위치 정보 수집용) |
 
 **Response:**
 
@@ -672,37 +692,96 @@ TTS 스트리밍
 
 ```json
 {
-  "answer": 0
+  "answer": 0,
+  "is_last_quiz": false
 }
 ```
 
-**Response (정답):**
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| answer | integer | 필수 | 답안 (0-3) |
+| is_last_quiz | boolean | 선택 | 마지막 퀴즈 여부 (기본: false) |
+
+**Response (정답 - 첫 시도):**
 
 ```json
 {
   "success": true,
   "is_correct": true,
-  "points_awarded": 300,
+  "earned": 20,
+  "total_score": 20,
+  "retry_allowed": false,
+  "hint": null,
+  "completed": false,
+  "points_awarded": 0,
+  "already_completed": false,
+  "new_balance": null,
+  "explanation": "근정전은 조선의 공식 의례가 치러지던 정전입니다."
+}
+```
+
+**Response (오답 - 첫 시도):**
+
+```json
+{
+  "success": true,
+  "is_correct": false,
+  "earned": 0,
+  "total_score": 0,
+  "retry_allowed": true,
+  "hint": "왕이 공식 업무를 보던 전각",
+  "completed": false,
+  "points_awarded": 0,
+  "already_completed": false,
+  "new_balance": null,
+  "explanation": null
+}
+```
+
+**Response (정답 - 힌트 후 재시도):**
+
+```json
+{
+  "success": true,
+  "is_correct": true,
+  "earned": 10,
+  "total_score": 10,
+  "retry_allowed": false,
+  "hint": null,
+  "completed": false,
+  "points_awarded": 0,
+  "already_completed": false,
+  "new_balance": null,
+  "explanation": "근정전은 조선의 공식 의례가 치러지던 정전입니다."
+}
+```
+
+**Response (퀘스트 완료 - 마지막 퀴즈 정답):**
+
+```json
+{
+  "success": true,
+  "is_correct": true,
+  "earned": 20,
+  "total_score": 100,
+  "retry_allowed": false,
+  "hint": null,
+  "completed": true,
+  "points_awarded": 100,
   "already_completed": false,
   "new_balance": 1540,
   "explanation": "근정전은 조선의 공식 의례가 치러지던 정전입니다."
 }
 ```
 
-**Response (오답):**
-
-```json
-{
-  "success": true,
-  "is_correct": false,
-  "points_awarded": 0,
-  "already_completed": false
-}
-```
-
 **Notes:**
-- 동일 퀘스트에 대해 이미 `completed` 상태라면 `points_awarded`는 0이고 `already_completed`가 true로 반환됩니다.
-- 모든 시도 횟수는 `user_quest_progress.quiz_attempts`에 누적됩니다.
+- **점수 시스템**: 첫 시도 정답 20점, 힌트 후 재시도 정답 10점
+- **퀘스트 완료**: `is_last_quiz`가 true이고 정답일 때 퀘스트가 완료되며 총 점수가 포인트로 적립됩니다
+- **재시도**: 첫 시도 오답 시 `retry_allowed`가 true이고 `hint`가 제공됩니다
+- 동일 퀘스트에 대해 이미 `completed` 상태라면 `points_awarded`는 0이고 `already_completed`가 true로 반환됩니다
+- 모든 시도 횟수는 `user_quest_progress.quiz_attempts`에 누적됩니다
 
 ---
 
@@ -775,6 +854,13 @@ TTS 스트리밍
 ### GET /reward/list
 
 사용 가능한 리워드 목록
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| type | string | 선택 | 리워드 타입 필터 (food, cafe, shopping, ticket, activity, entertainment, beauty, wellness) |
+| search | string | 선택 | 리워드 이름 검색 |
 
 **Response:**
 
@@ -1131,6 +1217,8 @@ VLM 서비스 상태 확인
   "image": "base64_encoded_image",
   "latitude": 37.5796,
   "longitude": 126.9770,
+  "start_latitude": 37.5665,
+  "start_longitude": 126.9780,
   "radius_km": 5.0,
   "limit": 3,
   "quest_only": true
@@ -1148,6 +1236,8 @@ VLM 서비스 상태 확인
   ],
   "latitude": 37.5796,
   "longitude": 126.9770,
+  "start_latitude": 37.5665,
+  "start_longitude": 126.9780,
   "radius_km": 5.0,
   "limit": 3,
   "quest_only": true
@@ -1160,9 +1250,11 @@ VLM 서비스 상태 확인
 |-------|------|----------|-------------|
 | image | string | 선택* | Base64 인코딩 단일 이미지 (`images`가 없을 때 필수) |
 | images | array[string] | 선택* | Base64 인코딩 이미지 배열 (1개 또는 3개, `image`가 없을 때 필수) |
-| latitude | float | 선택 | 위도 |
-| longitude | float | 선택 | 경도 |
-| radius_km | float | 선택 | 검색 반경 (기본: 5.0) |
+| latitude | float | 선택 | 현재 위치 위도 (거리 계산용) |
+| longitude | float | 선택 | 현재 위치 경도 (거리 계산용) |
+| start_latitude | float | 선택 | 출발 위치 위도 (정렬 기준, 없으면 latitude 사용) |
+| start_longitude | float | 선택 | 출발 위치 경도 (정렬 기준, 없으면 longitude 사용) |
+| radius_km | float | 선택 | 검색 반경 (기본: 5.0, 현재 사용 안 함) |
 | limit | integer | 선택 | 결과 개수 (기본: 3, 상위 3개 추천) |
 | quest_only | boolean | 선택 | 퀘스트 장소만 (기본: true) |
 
@@ -1206,6 +1298,7 @@ VLM 서비스 상태 확인
 **Notes:**
 - `quest_id`는 해당 place에 연결된 활성 quest가 있을 때만 포함됩니다
 - `distance_km`는 `latitude`와 `longitude`가 제공될 때만 계산됩니다
+- **정렬 기준**: `start_latitude`와 `start_longitude`가 지정되면 출발 위치 기준으로 가까운 순 정렬, 없으면 `latitude`와 `longitude` 사용
 - Quest 정보가 없으면 Place 정보만 사용됩니다
 - **다중 이미지 지원**: `images` 배열에 1개 또는 최대 3개 이미지를 제공할 수 있습니다. 3개 이미지일 경우 평균 임베딩을 사용하여 더 정확한 추천을 제공합니다.
 - **DB 검증**: Pinecone에서 반환된 결과가 실제 DB에 존재하는지 검증하여, 누락된 장소는 제외하고 실제 존재하는 장소만 추천합니다.
@@ -2197,6 +2290,185 @@ STT + TTS 통합 엔드포인트
 - **거리 정보**: `distance_from_start`는 출발 지점으로부터의 거리(km)입니다
 - **중복 체크**: `place_id` 기준으로 중복된 장소는 제외됩니다
 - **최대 4개 제한**: 추천 결과는 최대 4개 퀘스트로 제한됩니다
+
+---
+
+## Analytics Endpoints
+
+### GET /analytics/location-stats/district
+
+지자체별 위치 정보 통계 조회
+
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| start_date | string | 선택 | 시작 날짜 (YYYY-MM-DD) |
+| end_date | string | 선택 | 종료 날짜 (YYYY-MM-DD) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "stats": [
+    {
+      "district": "종로구",
+      "visitor_count": 150,
+      "quest_count": 320,
+      "interest_count": 450,
+      "avg_distance_km": 1.2
+    }
+  ],
+  "total_districts": 5,
+  "period": {
+    "start_date": "2024-01-01",
+    "end_date": "2024-01-31"
+  }
+}
+```
+
+**Notes:**
+- `visitor_count`: 익명화된 사용자 수 (중복 제거)
+- `quest_count`: 퀘스트 방문 횟수
+- `interest_count`: 관심 표시 횟수
+- `avg_distance_km`: 평균 거리 (km)
+- 방문자 수 기준 내림차순 정렬
+
+---
+
+### GET /analytics/location-stats/quest
+
+퀘스트별 방문 통계 조회
+
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| quest_id | integer | 선택 | 퀘스트 ID (지정 시 해당 퀘스트만) |
+| start_date | string | 선택 | 시작 날짜 (YYYY-MM-DD) |
+| end_date | string | 선택 | 종료 날짜 (YYYY-MM-DD) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "stats": [
+    {
+      "quest_id": 1,
+      "quest_name": "경복궁",
+      "visitor_count": 85,
+      "visit_count": 120,
+      "district": "종로구",
+      "avg_distance_km": 0.8
+    }
+  ],
+  "total_quests": 10,
+  "period": {
+    "start_date": "2024-01-01",
+    "end_date": "2024-01-31"
+  }
+}
+```
+
+**Notes:**
+- `visitor_count`: 방문자 수 (중복 제거)
+- `visit_count`: 방문 횟수 (전체)
+- 방문 횟수 기준 내림차순 정렬
+
+---
+
+### GET /analytics/location-stats/time
+
+시간대별 통계 조회
+
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| start_date | string | 선택 | 시작 날짜 (YYYY-MM-DD) |
+| end_date | string | 선택 | 종료 날짜 (YYYY-MM-DD) |
+| group_by | string | 선택 | 그룹화 기준: hour, day, week (기본: hour) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "stats": [
+    {
+      "time_period": "2024-01-01 14:00",
+      "visitor_count": 25,
+      "visit_count": 35
+    }
+  ],
+  "total_periods": 24,
+  "group_by": "hour",
+  "period": {
+    "start_date": "2024-01-01",
+    "end_date": "2024-01-01"
+  }
+}
+```
+
+**Notes:**
+- `group_by`:
+  - `hour`: 시간별 (예: "2024-01-01 14:00")
+  - `day`: 일별 (예: "2024-01-01")
+  - `week`: 주별 (예: "2024-W01")
+- 시간대 순서대로 정렬
+
+---
+
+### GET /analytics/location-stats/summary
+
+전체 요약 통계 조회
+
+**Headers:**
+- `Authorization: Bearer <token>` (필수)
+
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| start_date | string | 선택 | 시작 날짜 (YYYY-MM-DD) |
+| end_date | string | 선택 | 종료 날짜 (YYYY-MM-DD) |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "summary": {
+    "total_visitors": 500,
+    "total_visits": 1200,
+    "total_quests": 50,
+    "total_districts": 15,
+    "avg_distance_km": 1.5
+  },
+  "period": {
+    "start_date": "2024-01-01",
+    "end_date": "2024-01-31"
+  }
+}
+```
+
+**Notes:**
+- `total_visitors`: 총 방문자 수 (중복 제거)
+- `total_visits`: 총 방문 횟수
+- `total_quests`: 방문된 퀘스트 수 (중복 제거)
+- `total_districts`: 방문된 자치구 수 (중복 제거)
+- `avg_distance_km`: 평균 거리 (km)
 
 ---
 
