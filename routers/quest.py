@@ -213,11 +213,27 @@ async def start_quest(request: QuestStartRequest, user_id: str = Depends(get_cur
             status = "in_progress"
 
         # Mirror progress row for quiz tracking
-        db.table("user_quest_progress").upsert({
-            "user_id": user_id,
-            "quest_id": request.quest_id,
-            "status": status
-        }).execute()
+        # 이미 존재하는지 확인 후 upsert
+        existing_progress = db.table("user_quest_progress") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .eq("quest_id", request.quest_id) \
+            .execute()
+        
+        if existing_progress.data:
+            # 이미 존재하면 업데이트
+            db.table("user_quest_progress") \
+                .update({"status": status}) \
+                .eq("user_id", user_id) \
+                .eq("quest_id", request.quest_id) \
+                .execute()
+        else:
+            # 없으면 삽입
+            db.table("user_quest_progress").insert({
+                "user_id": user_id,
+                "quest_id": request.quest_id,
+                "status": status
+            }).execute()
 
         # 위치 정보 수집 (1km 이내일 때만)
         if request.latitude and request.longitude:

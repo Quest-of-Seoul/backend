@@ -129,9 +129,15 @@ def log_location_data(
                 "treasure_hunt_count": treasure_hunt_count
             }
             
-            db.table("anonymous_location_logs").insert(log_data).execute()
+            try:
+                db.table("anonymous_location_logs").insert(log_data).execute()
+                logger.info(f"Location log saved: quest_id={quest_id}, district={district}, distance={distance_km:.2f}km")
+            except Exception as table_error:
+                if "PGRST205" in str(table_error) or "anonymous_location_logs" in str(table_error):
+                    logger.debug(f"anonymous_location_logs table not found, skipping log")
+                else:
+                    raise
             
-            logger.info(f"Location log saved: quest_id={quest_id}, district={district}, distance={distance_km:.2f}km")
             return True
         
         # Quest ID가 없거나 위치 정보가 없으면 수집하지 않음
@@ -209,8 +215,14 @@ def log_route_recommendation(
                     "treasure_hunt_count": 0
                 }
                 
-                db.table("anonymous_location_logs").insert(log_data).execute()
-                count += 1
+                try:
+                    db.table("anonymous_location_logs").insert(log_data).execute()
+                    count += 1
+                except Exception as table_error:
+                    if "PGRST205" in str(table_error) or "anonymous_location_logs" in str(table_error):
+                        logger.debug(f"anonymous_location_logs table not found, skipping log")
+                    else:
+                        raise
         except Exception as e:
             logger.error(f"Error logging route recommendation for quest {quest_id}: {e}", exc_info=True)
     
@@ -314,9 +326,15 @@ def log_periodic_location(
             "treasure_hunt_count": 0
         }
         
-        db.table("anonymous_location_logs").insert(log_data).execute()
+        try:
+            db.table("anonymous_location_logs").insert(log_data).execute()
+            logger.debug(f"Periodic location log saved: user_id={user_id[:8]}..., lat={user_latitude}, lon={user_longitude}, district={district}")
+        except Exception as table_error:
+            if "PGRST205" in str(table_error) or "anonymous_location_logs" in str(table_error):
+                logger.debug(f"anonymous_location_logs table not found, skipping log")
+            else:
+                raise
         
-        logger.debug(f"Periodic location log saved: user_id={user_id[:8]}..., lat={user_latitude}, lon={user_longitude}, district={district}")
         return True
     
     except Exception as e:
