@@ -18,10 +18,37 @@ def get_stt_client():
         return None
 
 
+def detect_audio_encoding(audio_bytes: bytes) -> Optional[speech.RecognitionConfig.AudioEncoding]:
+    if len(audio_bytes) < 4:
+        return None
+    
+    if audio_bytes[:4] == b'\x1a\x45\xdf\xa3':
+        logger.info("Detected WebM format, using WEBM_OPUS encoding")
+        return speech.RecognitionConfig.AudioEncoding.WEBM_OPUS
+    
+    if audio_bytes[:4] == b'RIFF' and len(audio_bytes) > 8 and audio_bytes[8:12] == b'WAVE':
+        logger.info("Detected WAV format, using LINEAR16 encoding")
+        return speech.RecognitionConfig.AudioEncoding.LINEAR16
+    
+    if audio_bytes[:4] == b'fLaC':
+        logger.info("Detected FLAC format")
+        return speech.RecognitionConfig.AudioEncoding.FLAC
+    
+    if audio_bytes[:4] == b'OggS':
+        logger.info("Detected Ogg format, using OGG_OPUS encoding")
+        return speech.RecognitionConfig.AudioEncoding.OGG_OPUS
+    
+    if audio_bytes[:3] == b'ID3' or (len(audio_bytes) > 2 and audio_bytes[:2] == b'\xff\xfb'):
+        logger.info("Detected MP3 format, will use ENCODING_UNSPECIFIED")
+        return speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED
+    
+    return None
+
+
 def speech_to_text(
     audio_bytes: bytes,
     language_code: str = "en-US",
-    sample_rate_hertz: int = 16000,
+    sample_rate_hertz: Optional[int] = None,
     encoding: Optional[speech.RecognitionConfig.AudioEncoding] = None
 ) -> Optional[str]:
     client = get_stt_client()
@@ -29,14 +56,33 @@ def speech_to_text(
         return None
     
     try:
+        if encoding is None:
+            detected_encoding = detect_audio_encoding(audio_bytes)
+            if detected_encoding:
+                encoding = detected_encoding
+                logger.info(f"Auto-detected encoding: {encoding}")
+            else:
+                encoding = speech.RecognitionConfig.AudioEncoding.WEBM_OPUS
+                logger.info(f"Using default encoding: WEBM_OPUS")
+        
         config_dict = {
-            "sample_rate_hertz": sample_rate_hertz,
             "language_code": language_code,
             "enable_automatic_punctuation": True,
+            "encoding": encoding,
         }
         
-        if encoding is not None:
-            config_dict["encoding"] = encoding
+        if sample_rate_hertz is None:
+            if encoding in [
+                speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
+                speech.RecognitionConfig.AudioEncoding.OGG_OPUS,
+            ]:
+                sample_rate_hertz = 48000
+            elif encoding == speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED:
+                sample_rate_hertz = 16000
+            else:
+                sample_rate_hertz = 16000
+        
+        config_dict["sample_rate_hertz"] = sample_rate_hertz
         
         config = speech.RecognitionConfig(**config_dict)
         
@@ -65,7 +111,7 @@ def speech_to_text(
 def speech_to_text_from_base64(
     audio_base64: str,
     language_code: str = "en-US",
-    sample_rate_hertz: int = 16000,
+    sample_rate_hertz: Optional[int] = None,
     encoding: Optional[speech.RecognitionConfig.AudioEncoding] = None
 ) -> Optional[str]:
     try:
