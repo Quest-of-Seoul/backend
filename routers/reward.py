@@ -161,7 +161,15 @@ async def claim_reward(request: ClaimRewardRequest, user_id: str = Depends(get_c
         return {
             "status": "success",
             "message": "Reward claimed successfully!",
-            "reward": reward_data['name'],
+            "reward": {
+                "id": reward_data['id'],
+                "name": reward_data['name'],
+                "type": reward_data.get('type'),
+                "point_cost": reward_data['point_cost'],
+                "description": reward_data.get('description'),
+                "image_url": reward_data.get('image_url'),
+                "expire_date": reward_data.get('expire_date')
+            },
             "qr_code": qr_token,
             "remaining_points": user_points - reward_data['point_cost']
         }
