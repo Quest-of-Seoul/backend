@@ -42,7 +42,7 @@ CREATE INDEX idx_places_source ON places(source);
 CREATE INDEX idx_places_category_source ON places(category, source);
 CREATE INDEX idx_places_district ON places(district);
 
--- JSONB 필드에 대한 GIN 인덱스
+-- GIN indexes for JSONB fields
 CREATE INDEX idx_places_metadata_gin ON places USING GIN (metadata);
 CREATE INDEX idx_places_images_gin ON places USING GIN (images);
 
@@ -267,22 +267,18 @@ BEGIN
         RETURN NULL;
     END IF;
     
-    -- Try Korean pattern: "종로구", "강남구" etc. (한글 + 구)
     match_result := regexp_match(addr, '[가-힣]+구');
     IF match_result IS NOT NULL AND array_length(match_result, 1) > 0 THEN
         district_name := match_result[1];
         RETURN district_name;
     END IF;
     
-    -- Try English pattern: "Jongno-gu", "Gangnam-gu" etc.
     match_result := regexp_match(addr, '[A-Za-z]+-gu', 'i');
     IF match_result IS NOT NULL AND array_length(match_result, 1) > 0 THEN
-        -- Convert "Jongno-gu" to "Jongno-gu" (keep as is, or can normalize)
         district_name := match_result[1];
         RETURN district_name;
     END IF;
     
-    -- Try another English pattern: "Jongno gu" (with space)
     match_result := regexp_match(addr, '[A-Za-z]+\s+gu', 'i');
     IF match_result IS NOT NULL AND array_length(match_result, 1) > 0 THEN
         district_name := REPLACE(match_result[1], ' ', '-');
@@ -580,7 +576,6 @@ SET district = extract_district_from_address(address)
 WHERE district IS NULL AND address IS NOT NULL;
 
 -- Update quests with place_id based on name matching first, then location matching
--- Step 1: Try name-based matching (exact or similar)
 UPDATE quests q
 SET place_id = (
     SELECT p.id
@@ -597,7 +592,6 @@ SET place_id = (
 )
 WHERE q.place_id IS NULL;
 
--- Step 2: For remaining quests, try location-based matching (within 0.05 degrees ~ 5km)
 UPDATE quests q
 SET place_id = (
     SELECT p.id
@@ -736,7 +730,7 @@ VALUES
      '광화문광장은 경복궁의 남문인 광화문 앞에 위치한 광장으로, 경복궁과 바로 연결되어 있습니다.',
      'easy'),
     
-    -- Myeongdong Cathedral 퀴즈 (5개)
+    -- Myeongdong Cathedral 퀴즈
     ((SELECT id FROM quests WHERE name = 'Myeongdong Cathedral' LIMIT 1),
      '명동성당이 완공된 연도는 언제인가요?',
      '["1895년", "1898년", "1900년", "1902년"]'::jsonb,
@@ -856,49 +850,49 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- Table Comments
-COMMENT ON TABLE users IS '사용자 정보';
+COMMENT ON TABLE users IS 'User information';
 COMMENT ON COLUMN users.password_hash IS 'bcrypt hashed password for authentication';
-COMMENT ON TABLE places IS 'AR 카메라로 촬영 가능한 서울 주요 장소 정보';
-COMMENT ON TABLE quests IS '장소 기반 퀘스트 (VLM places 연동 가능)';
-COMMENT ON TABLE quest_quizzes IS '퀘스트별 객관식 퀴즈';
-COMMENT ON TABLE user_quests IS '사용자별 퀘스트 진행 상황';
-COMMENT ON TABLE user_quest_progress IS '사용자별 퀘스트 & 퀴즈 상세 진행 상황';
-COMMENT ON COLUMN user_quest_progress.score IS 'Total quiz score (max 100 points)';
+COMMENT ON TABLE places IS 'Seoul major landmarks that can be photographed with AR camera';
+COMMENT ON TABLE quests IS 'Place-based quests';
+COMMENT ON TABLE quest_quizzes IS 'Quiz questions for each quest';
+COMMENT ON TABLE user_quests IS 'User quest progress';
+COMMENT ON TABLE user_quest_progress IS 'User quest & quiz detailed progress';
+COMMENT ON COLUMN user_quest_progress.score IS 'Total quiz score';
 COMMENT ON COLUMN user_quest_progress.correct_count IS 'Number of correct answers';
 COMMENT ON COLUMN user_quest_progress.used_hint IS 'Whether hint was used in current question';
-COMMENT ON COLUMN user_quest_progress.current_quiz IS 'Current quiz number (0-4 for 5 questions)';
-COMMENT ON TABLE points IS '포인트 트랜잭션 로그';
-COMMENT ON TABLE rewards IS '포인트로 교환 가능한 리워드 아이템';
-COMMENT ON TABLE user_rewards IS '사용자가 획득한 리워드 목록';
-COMMENT ON TABLE chat_logs IS 'AI 도슨트 대화 기록';
-COMMENT ON COLUMN chat_logs.mode IS '채팅 모드: explore(탐색 모드), quest(퀘스트 모드)';
-COMMENT ON COLUMN chat_logs.function_type IS '기능 타입: rag_chat(일반 RAG 채팅), vlm_chat(VLM 채팅), route_recommend(경로 추천), image_similarity(이미지 유사도)';
-COMMENT ON COLUMN chat_logs.image_url IS '이미지 URL (퀘스트 모드 VLM 채팅용)';
-COMMENT ON COLUMN chat_logs.chat_session_id IS '채팅 세션 ID (같은 대화를 묶는 UUID)';
-COMMENT ON COLUMN chat_logs.title IS '채팅 세션 제목 (일반 채팅: 첫 질문, 여행 일정: 테마)';
-COMMENT ON COLUMN chat_logs.is_read_only IS '읽기 전용 여부 (여행 일정은 true)';
-COMMENT ON TABLE vlm_logs IS 'VLM 이미지 분석 로그';
+COMMENT ON COLUMN user_quest_progress.current_quiz IS 'Current quiz number';
+COMMENT ON TABLE points IS 'Point transaction log';
+COMMENT ON TABLE rewards IS 'Rewards that can be redeemed with points';
+COMMENT ON TABLE user_rewards IS 'List of rewards obtained by users';
+COMMENT ON TABLE chat_logs IS 'AI docent conversation history';
+COMMENT ON COLUMN chat_logs.mode IS 'Chat mode: explore, quest';
+COMMENT ON COLUMN chat_logs.function_type IS 'Function type: rag_chat, vlm_chat, route_recommend, image_similarity';
+COMMENT ON COLUMN chat_logs.image_url IS 'Image URL';
+COMMENT ON COLUMN chat_logs.chat_session_id IS 'Chat session ID';
+COMMENT ON COLUMN chat_logs.title IS 'Chat session title';
+COMMENT ON COLUMN chat_logs.is_read_only IS 'Read-only status';
+COMMENT ON TABLE vlm_logs IS 'VLM image analysis log';
 
 -- Column Comments for places table
-COMMENT ON COLUMN places.source IS '데이터 출처: manual(수동입력), tour_api(TourAPI), visit_seoul(VISIT SEOUL API), both(양쪽 모두)';
-COMMENT ON COLUMN places.metadata IS '상세 메타데이터 (JSONB): tour_api, visit_seoul, rag_text 등 포함';
-COMMENT ON COLUMN places.images IS '이미지 URL 배열 (JSONB)';
-COMMENT ON COLUMN places.district IS '자치구 (주소에서 정규식으로 추출: 예: 종로구, 강남구)';
+COMMENT ON COLUMN places.source IS 'Data source: manual, tour_api, visit_seoul, both';
+COMMENT ON COLUMN places.metadata IS 'Detailed metadata: tour_api, visit_seoul, rag_text, etc.';
+COMMENT ON COLUMN places.images IS 'Image URL array';
+COMMENT ON COLUMN places.district IS 'District';
 
--- Anonymous Location Logs Table (익명화된 위치 정보 수집)
+-- Anonymous Location Logs Table
 CREATE TABLE IF NOT EXISTS anonymous_location_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    anonymous_user_id VARCHAR(64) NOT NULL,  -- 해시된 사용자 ID (SHA-256)
+    anonymous_user_id VARCHAR(64) NOT NULL,
     quest_id INTEGER REFERENCES quests(id) ON DELETE SET NULL,
     place_id UUID REFERENCES places(id) ON DELETE SET NULL,
-    user_latitude DECIMAL(10, 8),  -- 사용자 현재 위치 (위도)
-    user_longitude DECIMAL(11, 8),  -- 사용자 현재 위치 (경도)
-    start_latitude DECIMAL(10, 8),  -- 출발 위치 (위도)
-    start_longitude DECIMAL(11, 8),  -- 출발 위치 (경도)
-    distance_from_quest_km DECIMAL(8, 3),  -- 퀘스트 장소로부터의 거리 (km)
-    district VARCHAR(50),  -- 자치구 (places.district 참조)
-    interest_type VARCHAR(50),  -- 관심 유형: quest_start, quest_view, route_recommend, image_similarity 등
-    treasure_hunt_count INTEGER DEFAULT 0,  -- 보물 찾기 횟수
+    user_latitude DECIMAL(10, 8),
+    user_longitude DECIMAL(11, 8),
+    start_latitude DECIMAL(10, 8),
+    start_longitude DECIMAL(11, 8),
+    distance_from_quest_km DECIMAL(8, 3),
+    district VARCHAR(50),
+    interest_type VARCHAR(50),
+    treasure_hunt_count INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -911,10 +905,10 @@ CREATE INDEX idx_anonymous_location_logs_created_at ON anonymous_location_logs(c
 CREATE INDEX idx_anonymous_location_logs_quest_district ON anonymous_location_logs(quest_id, district);
 CREATE INDEX idx_anonymous_location_logs_created_district ON anonymous_location_logs(created_at, district);
 
-COMMENT ON TABLE anonymous_location_logs IS '익명화된 위치 정보 수집 로그 (지자체/상권 마케팅 데이터용)';
-COMMENT ON COLUMN anonymous_location_logs.anonymous_user_id IS 'SHA-256 해시된 사용자 ID (익명화)';
-COMMENT ON COLUMN anonymous_location_logs.distance_from_quest_km IS '퀘스트 장소로부터의 거리 (1km 이내만 수집)';
-COMMENT ON COLUMN anonymous_location_logs.interest_type IS '관심 유형: quest_start(퀘스트 시작), quest_view(퀘스트 조회), route_recommend(경로 추천), image_similarity(이미지 유사도)';
+COMMENT ON TABLE anonymous_location_logs IS 'Anonymous location tracking log';
+COMMENT ON COLUMN anonymous_location_logs.anonymous_user_id IS 'SHA-256 hashed user ID';
+COMMENT ON COLUMN anonymous_location_logs.distance_from_quest_km IS 'Distance from quest place';
+COMMENT ON COLUMN anonymous_location_logs.interest_type IS 'Interest type: quest_start, quest_view, route_recommend, image_similarity';
 
 -- Update table statistics for query optimization
 ANALYZE places;

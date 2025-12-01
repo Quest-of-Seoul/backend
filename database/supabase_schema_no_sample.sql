@@ -1,6 +1,4 @@
 -- Quest of Seoul - Supabase (PostgreSQL) Schema (No Sample Data)
--- This schema file contains only table definitions, functions, and indexes.
--- No sample data is included.
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -44,7 +42,7 @@ CREATE INDEX idx_places_source ON places(source);
 CREATE INDEX idx_places_category_source ON places(category, source);
 CREATE INDEX idx_places_district ON places(district);
 
--- JSONB 필드에 대한 GIN 인덱스
+-- GIN indexes for JSONB fields
 CREATE INDEX idx_places_metadata_gin ON places USING GIN (metadata);
 CREATE INDEX idx_places_images_gin ON places USING GIN (images);
 
@@ -269,22 +267,18 @@ BEGIN
         RETURN NULL;
     END IF;
     
-    -- Try Korean pattern: "종로구", "강남구" etc. (한글 + 구)
     match_result := regexp_match(addr, '[가-힣]+구');
     IF match_result IS NOT NULL AND array_length(match_result, 1) > 0 THEN
         district_name := match_result[1];
         RETURN district_name;
     END IF;
     
-    -- Try English pattern: "Jongno-gu", "Gangnam-gu" etc.
     match_result := regexp_match(addr, '[A-Za-z]+-gu', 'i');
     IF match_result IS NOT NULL AND array_length(match_result, 1) > 0 THEN
-        -- Convert "Jongno-gu" to "Jongno-gu" (keep as is, or can normalize)
         district_name := match_result[1];
         RETURN district_name;
     END IF;
     
-    -- Try another English pattern: "Jongno gu" (with space)
     match_result := regexp_match(addr, '[A-Za-z]+\s+gu', 'i');
     IF match_result IS NOT NULL AND array_length(match_result, 1) > 0 THEN
         district_name := REPLACE(match_result[1], ' ', '-');
@@ -556,34 +550,34 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Table Comments
-COMMENT ON TABLE users IS '사용자 정보';
+COMMENT ON TABLE users IS 'User information';
 COMMENT ON COLUMN users.password_hash IS 'bcrypt hashed password for authentication';
-COMMENT ON TABLE places IS 'AR 카메라로 촬영 가능한 서울 주요 장소 정보';
-COMMENT ON TABLE quests IS '장소 기반 퀘스트 (VLM places 연동 가능)';
-COMMENT ON TABLE quest_quizzes IS '퀘스트별 객관식 퀴즈';
-COMMENT ON TABLE user_quests IS '사용자별 퀘스트 진행 상황';
-COMMENT ON TABLE user_quest_progress IS '사용자별 퀘스트 & 퀴즈 상세 진행 상황';
-COMMENT ON COLUMN user_quest_progress.score IS 'Total quiz score (max 100 points)';
+COMMENT ON TABLE places IS 'Seoul major landmarks that can be photographed with AR camera';
+COMMENT ON TABLE quests IS 'Place-based quests';
+COMMENT ON TABLE quest_quizzes IS 'Quiz questions for each quest';
+COMMENT ON TABLE user_quests IS 'User quest progress';
+COMMENT ON TABLE user_quest_progress IS 'User quest & quiz detailed progress';
+COMMENT ON COLUMN user_quest_progress.score IS 'Total quiz score';
 COMMENT ON COLUMN user_quest_progress.correct_count IS 'Number of correct answers';
 COMMENT ON COLUMN user_quest_progress.used_hint IS 'Whether hint was used in current question';
-COMMENT ON COLUMN user_quest_progress.current_quiz IS 'Current quiz number (0-4 for 5 questions)';
-COMMENT ON TABLE points IS '포인트 트랜잭션 로그';
-COMMENT ON TABLE rewards IS '포인트로 교환 가능한 리워드 아이템';
-COMMENT ON TABLE user_rewards IS '사용자가 획득한 리워드 목록';
-COMMENT ON TABLE chat_logs IS 'AI 도슨트 대화 기록';
-COMMENT ON COLUMN chat_logs.mode IS '채팅 모드: explore(탐색 모드), quest(퀘스트 모드)';
-COMMENT ON COLUMN chat_logs.function_type IS '기능 타입: rag_chat(일반 RAG 채팅), vlm_chat(VLM 채팅), route_recommend(경로 추천), image_similarity(이미지 유사도)';
-COMMENT ON COLUMN chat_logs.image_url IS '이미지 URL (퀘스트 모드 VLM 채팅용)';
-COMMENT ON COLUMN chat_logs.chat_session_id IS '채팅 세션 ID (같은 대화를 묶는 UUID)';
-COMMENT ON COLUMN chat_logs.title IS '채팅 세션 제목 (일반 채팅: 첫 질문, 여행 일정: 테마)';
-COMMENT ON COLUMN chat_logs.is_read_only IS '읽기 전용 여부 (여행 일정은 true)';
-COMMENT ON TABLE vlm_logs IS 'VLM 이미지 분석 로그';
+COMMENT ON COLUMN user_quest_progress.current_quiz IS 'Current quiz number';
+COMMENT ON TABLE points IS 'Point transaction log';
+COMMENT ON TABLE rewards IS 'Rewards that can be redeemed with points';
+COMMENT ON TABLE user_rewards IS 'List of rewards obtained by users';
+COMMENT ON TABLE chat_logs IS 'AI docent conversation history';
+COMMENT ON COLUMN chat_logs.mode IS 'Chat mode: explore, quest';
+COMMENT ON COLUMN chat_logs.function_type IS 'Function type: rag_chat, vlm_chat, route_recommend, image_similarity';
+COMMENT ON COLUMN chat_logs.image_url IS 'Image URL';
+COMMENT ON COLUMN chat_logs.chat_session_id IS 'Chat session ID';
+COMMENT ON COLUMN chat_logs.title IS 'Chat session title';
+COMMENT ON COLUMN chat_logs.is_read_only IS 'Read-only status';
+COMMENT ON TABLE vlm_logs IS 'VLM image analysis log';
 
 -- Column Comments for places table
-COMMENT ON COLUMN places.source IS '데이터 출처: manual(수동입력), tour_api(TourAPI), visit_seoul(VISIT SEOUL API), both(양쪽 모두)';
-COMMENT ON COLUMN places.metadata IS '상세 메타데이터 (JSONB): tour_api, visit_seoul, rag_text 등 포함';
-COMMENT ON COLUMN places.images IS '이미지 URL 배열 (JSONB)';
-COMMENT ON COLUMN places.district IS '자치구 (주소에서 정규식으로 추출: 예: 종로구, 강남구)';
+COMMENT ON COLUMN places.source IS 'Data source: manual, tour_api, visit_seoul, both';
+COMMENT ON COLUMN places.metadata IS 'Detailed metadata: tour_api, visit_seoul, rag_text, etc.';
+COMMENT ON COLUMN places.images IS 'Image URL array';
+COMMENT ON COLUMN places.district IS 'District';
 
 -- Update table statistics for query optimization
 ANALYZE places;
