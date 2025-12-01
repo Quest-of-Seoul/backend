@@ -157,7 +157,6 @@ def save_vlm_log(
     image_url: Optional[str],
     latitude: Optional[float],
     longitude: Optional[float],
-    vlm_provider: str,
     vlm_response: str,
     final_description: str,
     matched_place_id: Optional[str] = None,
@@ -172,7 +171,6 @@ def save_vlm_log(
         
         data = {
             "user_id": user_id,
-            "vlm_provider": vlm_provider,
             "vlm_response": vlm_response,
             "final_description": final_description
         }

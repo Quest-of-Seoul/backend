@@ -22,19 +22,23 @@ def speech_to_text(
     audio_bytes: bytes,
     language_code: str = "en-US",
     sample_rate_hertz: int = 16000,
-    encoding: speech.RecognitionConfig.AudioEncoding = speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED
+    encoding: Optional[speech.RecognitionConfig.AudioEncoding] = None
 ) -> Optional[str]:
     client = get_stt_client()
     if not client:
         return None
     
     try:
-        config = speech.RecognitionConfig(
-            encoding=encoding,
-            sample_rate_hertz=sample_rate_hertz,
-            language_code=language_code,
-            enable_automatic_punctuation=True,
-        )
+        config_dict = {
+            "sample_rate_hertz": sample_rate_hertz,
+            "language_code": language_code,
+            "enable_automatic_punctuation": True,
+        }
+        
+        if encoding is not None:
+            config_dict["encoding"] = encoding
+        
+        config = speech.RecognitionConfig(**config_dict)
         
         audio = speech.RecognitionAudio(content=audio_bytes)
         
@@ -62,7 +66,7 @@ def speech_to_text_from_base64(
     audio_base64: str,
     language_code: str = "en-US",
     sample_rate_hertz: int = 16000,
-    encoding: speech.RecognitionConfig.AudioEncoding = speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED
+    encoding: Optional[speech.RecognitionConfig.AudioEncoding] = None
 ) -> Optional[str]:
     try:
         audio_bytes = base64.b64decode(audio_base64)

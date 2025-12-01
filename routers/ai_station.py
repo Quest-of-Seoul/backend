@@ -705,7 +705,6 @@ Current Quest Reference Information:
                 image_url=image_url,
                 latitude=None,
                 longitude=None,
-                vlm_provider="gpt4v",
                 vlm_response=vlm_response,
                 final_description=final_description,
                 matched_place_id=matched_place.get("id") if matched_place else None,

@@ -257,7 +257,6 @@ Based on the above information, please introduce this place in a friendly and en
                 image_url=uploaded_image_url,
                 latitude=request.latitude,
                 longitude=request.longitude,
-                vlm_provider="gpt4v",
                 vlm_response=vlm_response,
                 final_description=final_description,
                 matched_place_id=matched_place_id,
@@ -320,8 +319,7 @@ Based on the above information, please introduce this place in a friendly and en
             "vlm_analysis": vlm_response,
             "similar_places": similar_images,
             "confidence_score": confidence_score,
-            "processing_time_ms": processing_time_ms,
-            "vlm_provider": "gpt4v"
+            "processing_time_ms": processing_time_ms
         }
         
         if recommended_quests:

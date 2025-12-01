@@ -1257,7 +1257,6 @@ TTS 스트리밍
   ],
   "confidence_score": 0.92,
   "processing_time_ms": 1250,
-  "vlm_provider": "gpt4v",
   "audio_url": "https://storage.url/audio.mp3"
 }
 ```
@@ -1273,7 +1272,6 @@ TTS 스트리밍
   "similar_places": [...],
   "confidence_score": 0.92,
   "processing_time_ms": 1250,
-  "vlm_provider": "gpt4v",
   "audio_url": "https://storage.url/audio.mp3",
   "recommended_quests": [  // VLM 분석 결과 기반 RAG 추천 쿼스트 (조건부, 관련 쿼스트가 발견될 때만 포함, 최대 5개)
     {
@@ -2666,7 +2664,8 @@ STT + TTS 통합 엔드포인트
 ```
 
 **Notes:**
-- `prefer_url=true`일 때는 `audio_url`과 `audio` 모두 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다 (`audio_url`은 null)
+- `prefer_url=true`일 때는 `audio_url`과 `audio` 모두 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다 (`audio_url`은 `null`)
+- 응답에는 항상 `audio` 필드가 포함되며, `audio_url`은 `prefer_url=true`일 때만 포함됩니다
 
 **Status Codes:**
 - 200: 성공
@@ -3029,12 +3028,6 @@ STT + TTS 통합 엔드포인트
 ### POST /location/track
 
 주기적인 위치 추적 (시간별 이동 경로 추적)
-
-**프론트엔드 구현 가이드:**
-- 앱이 포그라운드에 있을 때 주기적으로 호출 (권장: 30초~1분 간격)
-- 사용자가 위치 권한을 허용한 경우에만 호출
-- 배터리 최적화를 위해 이동 중일 때만 호출하는 것을 권장
-- 네트워크 오류 시 재시도 로직 구현 권장
 
 **Headers:**
 - `Authorization: Bearer <token>` (필수)
