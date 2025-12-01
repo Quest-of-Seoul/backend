@@ -98,9 +98,9 @@ JWT Bearer 토큰 기반 인증을 사용합니다.
 ### AI Station (AI Station 통합 기능)
 - GET `/ai-station/chat-list` - 채팅 리스트 조회 (인증 필요)
 - GET `/ai-station/chat-session/{session_id}` - 특정 세션의 채팅 내역 조회 (인증 필요)
-- POST `/ai-station/explore/rag-chat` - 일반 채팅 (인증 필요)
-- POST `/ai-station/quest/rag-chat` - 퀘스트 모드 채팅 (인증 필요)
-- POST `/ai-station/quest/vlm-chat` - 퀘스트 모드 VLM 채팅 (인증 필요)
+- POST `/ai-station/explore/rag-chat` - **Explore Mode AI Chat** - 일반 채팅 (text, voice 지원, quest_id 불필요) (인증 필요)
+- POST `/ai-station/quest/rag-chat` - **Quest Mode AI Plus Chat** - 퀘스트 모드 채팅 (text, voice, quest_id 지원) (인증 필요)
+- POST `/ai-station/quest/vlm-chat` - **Quest Mode AI Plus Chat** - 퀘스트 모드 VLM 채팅 (text, voice, image, quest_id 지원) (인증 필요)
 - POST `/ai-station/stt-tts` - STT + TTS 통합 (인증 필요)
 - POST `/ai-station/route-recommend` - 여행 일정 추천 (인증 필요)
 
@@ -2407,9 +2407,12 @@ VLM 서비스 상태 확인
 
 ### POST /ai-station/explore/rag-chat
 
-일반 채팅 (히스토리 저장)
-- 첫 번째 질문이 세션 제목으로 사용됨
-- 다시 들어와서 이어서 대화 가능
+**Explore Mode AI Chat** - 일반 채팅 (히스토리 저장)
+
+- **지원 기능**: Text, Voice (TTS)
+- **RAG 사용**: 벡터 임베딩 기반 RAG 검색 사용
+- **quest_id**: 불필요 (전달하지 않음)
+- **세션 관리**: 첫 번째 질문이 세션 제목으로 사용됨, 다시 들어와서 이어서 대화 가능
 
 **Headers:**
 - `Authorization: Bearer <token>` (필수)
@@ -2439,11 +2442,25 @@ VLM 서비스 상태 확인
 ```
 
 **Notes:**
+
+**RAG 검색 동작 방식:**
+1. 사용자 메시지를 벡터 임베딩으로 변환
+2. Pinecone에서 유사도 0.65 이상인 장소를 최대 5개 검색
+3. 검색 결과의 장소 정보(name, category, address, description)와 RAG 텍스트를 컨텍스트로 활용
+4. 유사도 점수도 함께 제공하여 관련성 표시
+5. LLM이 RAG 검색 결과를 기반으로 답변 생성
+
+**세션 관리:**
 - `chat_session_id`가 없으면 새 세션 생성
-- `chat_session_id`가 있으면 기존 세션에 추가
+- `chat_session_id`가 있으면 기존 세션에 추가 (이어서 대화 가능)
 - 첫 번째 메시지일 경우 `user_message`가 세션 제목으로 저장됨
-- **특정 장소 환영 메시지**: RAG 검색 결과에서 첫 번째 장소를 감지하여, 해당 장소에 대한 환영 메시지를 생성합니다 (예: "경복궁에 오신 것을 환영합니다")
-- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다
+
+**특수 기능:**
+- **장소 자동 감지**: RAG 검색 결과에서 첫 번째 장소를 감지하여, 해당 장소에 대한 환영 메시지를 생성합니다 (예: "경복궁에 오신 것을 환영합니다")
+- **Fallback 처리**: 벡터 임베딩 생성 실패 시 DB의 `search_places_by_rag_text` 함수로 텍스트 검색 fallback
+
+**오디오 처리:**
+- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio` (base64)만 포함됩니다
 - `enable_tts=true`일 때만 `audio` 또는 `audio_url`이 포함됩니다
 
 **Status Codes:**
@@ -2455,14 +2472,21 @@ VLM 서비스 상태 확인
 
 ### POST /ai-station/quest/rag-chat
 
-**AI Plus 챗** - 퀘스트 모드 맞춤형 여행 가이드 채팅
+**Quest Mode AI Plus Chat** - 퀘스트 모드 맞춤형 여행 가이드 채팅
 
-퀘스트 모드 - 장소 메타데이터를 context로 사용하는 LLM 채팅. 세션은 자동 생성되며 히스토리에 **조회 전용**으로 저장됩니다.
+- **지원 기능**: Text, Voice (TTS)
+- **RAG 사용**: X (quest_id 기반 DB 데이터만 사용, 벡터 검색 없음)
+- **quest_id**: 필수 (반드시 전달해야 함)
+- **이미지**: 미지원 (이미지가 필요하면 `/ai-station/quest/vlm-chat` 사용)
+- **세션 관리**: 조회 전용 (`is_read_only: true`), 이어서 대화 불가
+
+퀘스트 모드 - 해당 퀘스트의 장소 메타데이터를 context로 사용하는 LLM 채팅. 세션은 자동 생성되며 히스토리에 **조회 전용**으로 저장됩니다.
 
 **핵심 원칙:**
-1. **Quest_id 기반 데이터 필터링**: 오직 해당 `quest_id`에 해당하는 DB 데이터만 사용합니다.
+1. **Quest_id 기반 데이터 필터링**: 오직 해당 `quest_id`에 해당하는 DB 데이터만 사용합니다. 다른 퀘스트나 장소의 데이터는 절대 사용하지 않습니다.
 2. **데이터 기반 답변**: Quest와 Place 테이블에서 가져온 실제 데이터만을 기반으로 답변합니다.
-3. **DB 분리 설계**: 추후 맞춤형 여행 가이드 고도화를 위해 Quest별로 별도의 RAG 데이터베이스나 벡터 스토어를 분리할 수 있도록 설계되었습니다.
+3. **RAG 검색 없음**: Explore Mode와 달리 벡터 검색을 사용하지 않으며, 오직 해당 quest_id의 데이터만 사용합니다.
+4. **DB 분리 설계**: 추후 맞춤형 여행 가이드 고도화를 위해 Quest별로 별도의 RAG 데이터베이스나 벡터 스토어를 분리할 수 있도록 설계되었습니다.
 
 **Headers:**
 - `Authorization: Bearer <token>` (필수)
@@ -2496,12 +2520,22 @@ VLM 서비스 상태 확인
 ```
 
 **Notes:**
-- **Quest_id 필수**: `quest_id`는 반드시 전달해야 하며, 서버가 해당 퀘스트/장소 설명을 context로 붙여 응답합니다.
-- **데이터 필터링**: 오직 해당 `quest_id`에 연결된 Quest와 Place 데이터만 사용합니다. 다른 Quest나 Place의 데이터는 절대 사용하지 않습니다.
-- **히스토리 저장**: 히스토리에 저장되지만 `is_read_only = true` 로 표시되므로 이어 쓰기는 불가합니다.
-- **향후 RAG 검색**: 향후 RAG 검색을 추가할 경우에도 반드시 `quest_id` 또는 `place_id`로 필터링해야 합니다.
-- **DB 분리 설계**: 추후 고도화를 위해 Quest별로 독립적인 벡터 스토어 네임스페이스나 RAG 데이터베이스를 사용할 수 있도록 설계되었습니다.
-- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다 (응답 예시에는 둘 다 표시되지만 실제로는 하나만 반환됨)
+
+**Quest_id 필수:**
+- `quest_id`는 반드시 전달해야 하며, 서버가 해당 퀘스트/장소 설명을 context로 붙여 응답합니다.
+- 퀘스트 시작 시 받은 `quest_id`를 사용해야 합니다.
+
+**데이터 필터링:**
+- 오직 해당 `quest_id`에 연결된 Quest와 Place 데이터만 사용합니다.
+- 다른 Quest나 Place의 데이터는 절대 사용하지 않습니다.
+- Explore Mode와 달리 벡터 검색(RAG)을 사용하지 않습니다.
+
+**세션 관리:**
+- 히스토리에 저장되지만 `is_read_only = true`로 표시되므로 이어 쓰기는 불가합니다.
+- 각 메시지는 독립적으로 저장되며, 세션 ID는 히스토리 조회용으로만 사용됩니다.
+
+**오디오 처리:**
+- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio` (base64)만 포함됩니다
 - `enable_tts=true`일 때만 `audio` 또는 `audio_url`이 포함됩니다
 
 **Status Codes:**
@@ -2514,14 +2548,21 @@ VLM 서비스 상태 확인
 
 ### POST /ai-station/quest/vlm-chat
 
-**AI Plus 챗** - 퀘스트 모드 VLM 채팅
+**Quest Mode AI Plus Chat** - 퀘스트 모드 VLM 채팅
+
+- **지원 기능**: Text, Voice (TTS), Image
+- **RAG 사용**: X (quest_id 기반 DB 데이터만 사용, 벡터 검색 없음)
+- **quest_id**: 필수 (반드시 전달해야 함)
+- **이미지**: 필수 (base64 인코딩된 이미지)
+- **세션 관리**: 조회 전용 (`is_read_only: true`), 이어서 대화 불가
 
 퀘스트 모드 - VLM 채팅. 사용자가 업로드한 이미지를 분석하고, 현재 진행 중인 퀘스트 장소 정보와 결합하여 설명합니다. 결과는 히스토리에 **조회 전용**으로 저장됩니다.
 
 **핵심 원칙:**
-1. **Quest_id 기반 데이터 필터링**: 오직 해당 `quest_id`에 해당하는 DB 데이터만 사용합니다.
-2. **데이터 기반 답변**: Quest와 Place 테이블에서 가져온 실제 데이터만을 기반으로 이미지 분석 및 답변을 수행합니다.
-3. **DB 분리 설계**: 추후 맞춤형 여행 가이드 고도화를 위해 Quest별로 별도의 RAG 데이터베이스나 벡터 스토어를 분리할 수 있도록 설계되었습니다.
+1. **Quest_id 기반 데이터 필터링**: 오직 해당 `quest_id`에 해당하는 DB 데이터만 사용합니다. 다른 퀘스트나 장소의 데이터는 절대 사용하지 않습니다.
+2. **VLM + Quest 데이터 결합**: VLM으로 이미지를 분석한 후, 해당 quest_id의 Quest와 Place 데이터를 컨텍스트로 결합하여 답변을 생성합니다.
+3. **데이터 기반 답변**: Quest와 Place 테이블에서 가져온 실제 데이터만을 기반으로 이미지 분석 및 답변을 수행합니다.
+4. **DB 분리 설계**: 추후 맞춤형 여행 가이드 고도화를 위해 Quest별로 별도의 RAG 데이터베이스나 벡터 스토어를 분리할 수 있도록 설계되었습니다.
 
 **Headers:**
 - `Authorization: Bearer <token>` (필수)
@@ -2560,13 +2601,32 @@ VLM 서비스 상태 확인
 ```
 
 **Notes:**
-- **Quest_id 필수**: `quest_id`는 반드시 전달해야 하며, 해당 퀘스트 정보를 context로 첨부하여 이미지 분석을 수행합니다.
-- **데이터 필터링**: 오직 해당 `quest_id`에 연결된 Quest와 Place 데이터만 사용합니다. 다른 Quest나 Place의 데이터는 절대 사용하지 않습니다.
-- **이미지 분석**: 사용자가 찍은 이미지가 해당 장소와 어떻게 연결되는지 Quest 데이터를 기반으로 안내합니다.
-- **히스토리 저장**: 히스토리에서는 `function_type = vlm_chat`, `mode = quest`, `is_read_only = true`로 관리됩니다.
-- **향후 RAG 검색**: 향후 RAG 검색을 추가할 경우에도 반드시 `quest_id` 또는 `place_id`로 필터링해야 합니다.
-- **DB 분리 설계**: 추후 고도화를 위해 Quest별로 독립적인 벡터 스토어 네임스페이스나 RAG 데이터베이스를 사용할 수 있도록 설계되었습니다.
-- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다
+
+**Quest_id 필수:**
+- `quest_id`는 반드시 전달해야 하며, 해당 퀘스트 정보를 context로 첨부하여 이미지 분석을 수행합니다.
+- 퀘스트 시작 시 받은 `quest_id`를 사용해야 합니다.
+
+**이미지 처리:**
+- 이미지는 base64로 인코딩하여 전달해야 합니다.
+- 이미지는 자동으로 압축 및 스토리지에 업로드되며, `image_url`로 반환됩니다.
+
+**VLM 분석 프로세스:**
+1. 사용자가 업로드한 이미지를 VLM(GPT-4V)으로 분석
+2. 분석 결과에서 장소명, 카테고리, 특징 등을 추출
+3. 해당 `quest_id`의 Quest와 Place 데이터를 컨텍스트로 결합
+4. VLM 분석 결과와 Quest 데이터를 기반으로 최종 답변 생성
+
+**데이터 필터링:**
+- 오직 해당 `quest_id`에 연결된 Quest와 Place 데이터만 사용합니다.
+- 다른 Quest나 Place의 데이터는 절대 사용하지 않습니다.
+- Explore Mode와 달리 벡터 검색(RAG)을 사용하지 않습니다.
+
+**세션 관리:**
+- 히스토리에서는 `function_type = vlm_chat`, `mode = quest`, `is_read_only = true`로 관리됩니다.
+- 조회 전용이므로 이어서 대화는 불가합니다.
+
+**오디오 처리:**
+- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio` (base64)만 포함됩니다
 - `enable_tts=true`일 때만 `audio` 또는 `audio_url`이 포함됩니다
 
 **Status Codes:**

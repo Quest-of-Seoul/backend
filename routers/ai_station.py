@@ -344,9 +344,12 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
             context_parts = []
             detected_place_name = None
             if similar_places:
-                context_parts.append("Related Places Information:")
+                context_parts.append("Related Places Information (RAG Search Results):")
                 for idx, sp in enumerate(similar_places[:3], 1):
                     place = sp.get("place")
+                    rag_text = sp.get("rag_text", "")
+                    similarity = sp.get("similarity", 0.0)
+                    
                     if place:
                         if idx == 1 and place.get("name"):
                             detected_place_name = place['name']
@@ -362,7 +365,13 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
                             desc = place['description'][:200] + "..." if len(place['description']) > 200 else place['description']
                             place_info.append(f"Description: {desc}")
                         
+                        if rag_text:
+                            rag_preview = rag_text[:300] + "..." if len(rag_text) > 300 else rag_text
+                            place_info.append(f"Details: {rag_preview}")
+                        
                         context_parts.append(f"\n{idx}. {' | '.join(place_info)}")
+                        if similarity > 0:
+                            context_parts.append(f"   (Relevance: {similarity:.2f})")
                 
                 context_parts.append("")
                 context = "\n".join(context_parts)
