@@ -1074,7 +1074,7 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         
         # 4. 각 퀘스트에 대해 점수 계산
         def calculate_distance_score(lat1: float, lon1: float, lat2: float, lon2: float, max_radius: float = None) -> float:
-            """거리 기반 점수 (0.0 ~ 1.0, 가까울수록 높음)"""
+            """거리 기반 점수 (0.0 ~ 1.0, 가까울수록 높지만 차이를 완만하게)"""
             if not (lat1 and lon1 and lat2 and lon2):
                 return 0.5  # 위치 정보가 없으면 중간 점수
             
@@ -1093,9 +1093,16 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             c = 2 * math.asin(math.sqrt(a))
             distance_km = R * c
             
-            # 설정한 거리 이내면 거리 점수 적용, 그 외는 0.1
+            # 설정한 거리 이내면 거리 점수 적용 (더 완만한 곡선 사용)
             if distance_km <= radius_limit:
-                return max(0.1, 1.0 - (distance_km / radius_limit))
+                # 제곱근을 사용하여 가까운 곳과 먼 곳의 점수 차이를 줄임
+                # 예: 15km 반경에서
+                # 0.5km: 1.0 - sqrt(0.5/15) = 0.817
+                # 5km: 1.0 - sqrt(5/15) = 0.577
+                # 10km: 1.0 - sqrt(10/15) = 0.333
+                # 15km: 1.0 - sqrt(15/15) = 0.0
+                normalized_distance = distance_km / radius_limit
+                return max(0.2, 1.0 - math.sqrt(normalized_distance))
             else:
                 return 0.1
         
@@ -1202,12 +1209,12 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             diversity_score = calculate_diversity_score(quest_category, completed_categories)
             reward_score = calculate_reward_score(reward_point)
             
-            # 가중치 적용하여 종합 점수 계산
+            # 가중치 적용하여 종합 점수 계산 (거리 가중치를 낮춰서 다양성 향상)
             weights = {
-                "category": 0.3,      # 카테고리 매칭 중요
-                "distance": 0.25,     # 거리 중요
-                "diversity": 0.2,    # 다양성 중요
-                "popularity": 0.15,   # 인기도
+                "category": 0.35,     # 카테고리 매칭 중요 (증가)
+                "distance": 0.15,     # 거리 중요 (감소: 25% -> 15%)
+                "diversity": 0.25,   # 다양성 중요 (증가: 20% -> 25%)
+                "popularity": 0.15,  # 인기도
                 "reward": 0.1         # 포인트
             }
             
@@ -1305,9 +1312,14 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 return R * c
             
             # 일반 퀘스트를 출발 지점 기준 거리순으로 정렬 (필수 방문 장소 포함)
+            # 점수도 함께 고려하여 정렬 (거리와 점수의 균형)
             for quest in regular_quests:
                 quest["distance_from_start"] = calculate_distance_from_start(quest)
-            regular_quests.sort(key=lambda x: (x.get("distance_from_start", float('inf')), -x.get("recommendation_score", 0)))
+            # 거리와 점수를 모두 고려한 정렬 (거리 가중치를 낮춰서 점수가 높은 먼 곳도 선택 가능)
+            regular_quests.sort(key=lambda x: (
+                x.get("distance_from_start", float('inf')) * 0.3 +  # 거리 가중치 낮춤
+                (1.0 - x.get("recommendation_score", 0)) * 0.7     # 점수 가중치 높임
+            ))
             
             # 야경 장소도 거리순 정렬
             for quest in night_view_quests:
@@ -1419,19 +1431,75 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 recommended_quests = final_quests[:4]
                 logger.info("Using AI-based recommendation")
             else:
-                # AI 추천 실패 시 점수 기반으로 폴백
+                # AI 추천 실패 시 점수 기반으로 폴백 (거리 분산 고려)
                 recommended_quests = []
                 must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
                 remaining_count = 3  # 일반 3개 + 야경 1개 = 4개 (필수 방문 장소는 regular_quests에 포함됨)
                 
-                # 일반 퀘스트에서 선택 (야경 장소 제외, 필수 방문 장소 포함)
-                for quest in regular_quests[:remaining_count * 2]:
-                    if len(recommended_quests) >= remaining_count:
-                        break
-                    place_id = quest.get("place_id")
-                    if any(rq.get("place_id") == place_id for rq in recommended_quests):
-                        continue
-                    recommended_quests.append(quest)
+                # 거리 구간별로 균등하게 선택하여 다양성 확보
+                # 반경을 3개 구간으로 나눔: 가까운 곳(0-33%), 중간(33-66%), 먼 곳(66-100%)
+                if start_lat and start_lon and len(regular_quests) > remaining_count:
+                    # 거리 구간별로 퀘스트 분류
+                    distance_zones = {
+                        "near": [],      # 0-33% 구간
+                        "mid": [],       # 33-66% 구간
+                        "far": []        # 66-100% 구간
+                    }
+                    
+                    for quest in regular_quests:
+                        dist = quest.get("distance_from_start", float('inf'))
+                        if dist == float('inf'):
+                            continue
+                        
+                        # 반경의 비율로 구간 결정
+                        zone_ratio = dist / search_radius if search_radius > 0 else 0
+                        if zone_ratio <= 0.33:
+                            distance_zones["near"].append(quest)
+                        elif zone_ratio <= 0.66:
+                            distance_zones["mid"].append(quest)
+                        else:
+                            distance_zones["far"].append(quest)
+                    
+                    # 각 구간에서 균등하게 선택 (점수순으로 정렬된 상태에서)
+                    zones_order = ["near", "mid", "far"]
+                    zone_idx = 0
+                    
+                    while len(recommended_quests) < remaining_count:
+                        zone_name = zones_order[zone_idx % len(zones_order)]
+                        zone_quests = distance_zones[zone_name]
+                        
+                        if zone_quests:
+                            for quest in zone_quests:
+                                if len(recommended_quests) >= remaining_count:
+                                    break
+                                place_id = quest.get("place_id")
+                                if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                                    continue
+                                recommended_quests.append(quest)
+                        
+                        zone_idx += 1
+                        # 모든 구간을 한 번씩 확인했는데도 부족하면 일반 방식으로
+                        if zone_idx >= len(zones_order) * 2:
+                            break
+                    
+                    # 아직 부족하면 일반 방식으로 채우기
+                    if len(recommended_quests) < remaining_count:
+                        for quest in regular_quests:
+                            if len(recommended_quests) >= remaining_count:
+                                break
+                            place_id = quest.get("place_id")
+                            if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                                continue
+                            recommended_quests.append(quest)
+                else:
+                    # 위치 정보가 없으면 일반 방식으로 선택
+                    for quest in regular_quests[:remaining_count * 2]:
+                        if len(recommended_quests) >= remaining_count:
+                            break
+                        place_id = quest.get("place_id")
+                        if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                            continue
+                        recommended_quests.append(quest)
                 
                 # 마지막 장소는 항상 야경 특별 장소로 (가능한 경우)
                 if night_view_quests and len(recommended_quests) < 4:
@@ -1457,19 +1525,74 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 recommended_quests = recommended_quests[:4]
                 logger.info("Using score-based recommendation (AI fallback)")
         else:
-            # 점수 기반 추천 (기존 방식)
+            # 점수 기반 추천 (거리 분산 고려)
             recommended_quests = []
             must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
             remaining_count = 3  # 일반 3개 + 야경 1개 = 4개 (필수 방문 장소는 regular_quests에 포함됨)
             
-            # 일반 퀘스트에서 선택 (야경 장소 제외, 필수 방문 장소 포함)
-            for quest in regular_quests[:remaining_count * 2]:
-                if len(recommended_quests) >= remaining_count:
-                    break
-                place_id = quest.get("place_id")
-                if any(rq.get("place_id") == place_id for rq in recommended_quests):
-                    continue
-                recommended_quests.append(quest)
+            # 거리 구간별로 균등하게 선택하여 다양성 확보
+            if start_lat and start_lon and len(regular_quests) > remaining_count:
+                # 거리 구간별로 퀘스트 분류
+                distance_zones = {
+                    "near": [],      # 0-33% 구간
+                    "mid": [],       # 33-66% 구간
+                    "far": []        # 66-100% 구간
+                }
+                
+                for quest in regular_quests:
+                    dist = quest.get("distance_from_start", float('inf'))
+                    if dist == float('inf'):
+                        continue
+                    
+                    # 반경의 비율로 구간 결정
+                    zone_ratio = dist / search_radius if search_radius > 0 else 0
+                    if zone_ratio <= 0.33:
+                        distance_zones["near"].append(quest)
+                    elif zone_ratio <= 0.66:
+                        distance_zones["mid"].append(quest)
+                    else:
+                        distance_zones["far"].append(quest)
+                
+                # 각 구간에서 균등하게 선택 (점수순으로 정렬된 상태에서)
+                zones_order = ["near", "mid", "far"]
+                zone_idx = 0
+                
+                while len(recommended_quests) < remaining_count:
+                    zone_name = zones_order[zone_idx % len(zones_order)]
+                    zone_quests = distance_zones[zone_name]
+                    
+                    if zone_quests:
+                        for quest in zone_quests:
+                            if len(recommended_quests) >= remaining_count:
+                                break
+                            place_id = quest.get("place_id")
+                            if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                                continue
+                            recommended_quests.append(quest)
+                    
+                    zone_idx += 1
+                    # 모든 구간을 한 번씩 확인했는데도 부족하면 일반 방식으로
+                    if zone_idx >= len(zones_order) * 2:
+                        break
+                
+                # 아직 부족하면 일반 방식으로 채우기
+                if len(recommended_quests) < remaining_count:
+                    for quest in regular_quests:
+                        if len(recommended_quests) >= remaining_count:
+                            break
+                        place_id = quest.get("place_id")
+                        if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                            continue
+                        recommended_quests.append(quest)
+            else:
+                # 위치 정보가 없으면 일반 방식으로 선택
+                for quest in regular_quests[:remaining_count * 2]:
+                    if len(recommended_quests) >= remaining_count:
+                        break
+                    place_id = quest.get("place_id")
+                    if any(rq.get("place_id") == place_id for rq in recommended_quests):
+                        continue
+                    recommended_quests.append(quest)
             
             # 마지막 장소는 항상 야경 특별 장소로 (가능한 경우)
             if night_view_quests and len(recommended_quests) < 4:
