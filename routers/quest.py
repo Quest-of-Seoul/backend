@@ -51,6 +51,7 @@ class NearbyQuestRequest(BaseModel):
     lat: float
     lon: float
     radius_km: float = 1.0
+    query_text: Optional[str] = None
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -68,10 +69,56 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 
 @router.get("/list")
-async def get_all_quests():
+async def get_all_quests(
+    query: Optional[str] = None,
+    category: Optional[str] = None,
+    sort: str = "default",
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None
+):
     try:
         db = get_db()
-        result = db.table("quests").select("*, places(category, district, name, address, image_url, images)").execute()
+        
+        rag_quest_ids = {}
+        rag_scores = {}
+        if query:
+            try:
+                from services.quest_rag import search_quests_by_rag_text
+                from services.embedding import generate_text_embedding
+                
+                text_embedding = generate_text_embedding(query)
+                if text_embedding:
+                    rag_results = search_quests_by_rag_text(
+                        text_embedding=text_embedding,
+                        match_threshold=0.6,
+                        match_count=100,
+                        latitude=latitude,
+                        longitude=longitude,
+                        radius_km=None
+                    )
+                    
+                    for rag_result in rag_results:
+                        quest_id = rag_result.get("quest", {}).get("id")
+                        if quest_id:
+                            rag_quest_ids[quest_id] = True
+                            rag_scores[quest_id] = rag_result.get("similarity", 0.0)
+                    
+                    logger.info(f"RAG search found {len(rag_quest_ids)} matching quests")
+            except Exception as e:
+                logger.warning(f"RAG search failed: {e}")
+        
+        query_builder = db.table("quests").select("*, places(category, district, name, address, image_url, images)")
+        
+        if category:
+            query_builder = query_builder.eq("category", category)
+        
+        if query and rag_quest_ids:
+            query_builder = query_builder.in_("id", list(rag_quest_ids.keys()))
+        elif query and not rag_quest_ids:
+            return {"quests": [], "count": 0}
+        
+        query_builder = query_builder.eq("is_active", True)
+        result = query_builder.execute()
 
         quests = []
         for quest in result.data:
@@ -99,10 +146,28 @@ async def get_all_quests():
                     quest_data["place_images"] = place["images"]
             
             quest_data.pop("places", None)
+            
+            if quest.get("id") in rag_scores:
+                quest_data['rag_score'] = rag_scores[quest.get("id")]
+            
+            if latitude and longitude and quest.get("latitude") and quest.get("longitude"):
+                distance = haversine_distance(
+                    latitude, longitude,
+                    quest['latitude'], quest['longitude']
+                )
+                quest_data['distance_km'] = round(distance, 2)
+            
             quests.append(quest_data)
+        
+        if sort == "popularity":
+            quests.sort(key=lambda x: x.get("completion_count", 0), reverse=True)
+        elif sort == "distance" and latitude and longitude:
+            quests.sort(key=lambda x: x.get("distance_km", float('inf')))
+        elif query and rag_scores:
+            quests.sort(key=lambda x: rag_scores.get(x.get("id"), 0.0), reverse=True)
 
         logger.info(f"Retrieved {len(quests)} quests")
-        return {"quests": quests}
+        return {"quests": quests, "count": len(quests)}
 
     except Exception as e:
         logger.error(f"Error fetching quests: {e}", exc_info=True)
@@ -115,12 +180,44 @@ async def get_nearby_quests(request: NearbyQuestRequest):
         db = get_db()
         all_quests = db.table("quests").select("*, places(category, district, name, image_url, images)").execute()
 
+        rag_quest_ids = {}
+        rag_scores = {}
+        if request.query_text:
+            try:
+                from services.quest_rag import search_quests_by_rag_text
+                from services.embedding import generate_text_embedding
+                
+                text_embedding = generate_text_embedding(request.query_text)
+                if text_embedding:
+                    rag_results = search_quests_by_rag_text(
+                        text_embedding=text_embedding,
+                        match_threshold=0.6,
+                        match_count=50,
+                        latitude=request.lat,
+                        longitude=request.lon,
+                        radius_km=request.radius_km * 2
+                    )
+                    
+                    for rag_result in rag_results:
+                        quest_id = rag_result.get("quest", {}).get("id")
+                        if quest_id:
+                            rag_quest_ids[quest_id] = True
+                            rag_scores[quest_id] = rag_result.get("similarity", 0.0)
+                    
+                    logger.info(f"RAG search found {len(rag_quest_ids)} matching quests")
+            except Exception as e:
+                logger.warning(f"RAG search failed: {e}")
+
         nearby = []
         for quest in all_quests.data:
             distance = haversine_distance(
                 request.lat, request.lon,
                 quest['latitude'], quest['longitude']
             )
+            
+            if request.query_text and quest['id'] not in rag_quest_ids:
+                continue
+            
             if distance <= request.radius_km:
                 quest_obj = dict(quest)
                 
@@ -147,9 +244,23 @@ async def get_nearby_quests(request: NearbyQuestRequest):
                 quest_obj['quest_id'] = quest['id']
                 quest_obj['title'] = quest['name']
                 quest_obj['distance_km'] = round(distance, 2)
+                
+                if quest['id'] in rag_scores:
+                    quest_obj['rag_score'] = rag_scores[quest['id']]
+                    quest_obj['rag_match'] = True
+                else:
+                    quest_obj['rag_score'] = 0.0
+                    quest_obj['rag_match'] = False
+                
                 nearby.append(quest_obj)
 
-        nearby.sort(key=lambda x: x['distance_km'])
+        if request.query_text:
+            nearby.sort(key=lambda x: (
+                x.get('rag_score', 0.0) * 0.6 +
+                (1.0 / (x['distance_km'] + 0.1)) * 0.4
+            ), reverse=True)
+        else:
+            nearby.sort(key=lambda x: x['distance_km'])
 
         return {
             "quests": nearby,

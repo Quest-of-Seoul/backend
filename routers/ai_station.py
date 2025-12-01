@@ -64,6 +64,7 @@ class RouteRecommendRequest(BaseModel):
     start_latitude: Optional[float] = None
     start_longitude: Optional[float] = None
     radius_km: Optional[float] = None
+    image: Optional[str] = None
 
 
 def format_time_ago(created_at_str: str) -> str:
@@ -1008,6 +1009,85 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         def calculate_reward_score(reward_point: int) -> float:
             return min(1.0, reward_point / 200.0)
         
+        image_quest_scores = {}
+        if request.image:
+            try:
+                import base64
+                from services.vlm import analyze_place_image, extract_place_info_from_vlm_response
+                from services.quest_rag import search_quests_by_rag_text
+                from services.embedding import generate_text_embedding
+                
+                image_bytes = base64.b64decode(request.image)
+                
+                vlm_response = analyze_place_image(
+                    image_bytes=image_bytes,
+                    nearby_places=[],
+                    language="en",
+                    quest_context=None
+                )
+                
+                if vlm_response:
+                    place_info = extract_place_info_from_vlm_response(vlm_response)
+                    
+                    query_text_parts = []
+                    if place_info.get("place_name"):
+                        query_text_parts.append(place_info["place_name"])
+                    if place_info.get("category"):
+                        query_text_parts.append(place_info["category"])
+                    if place_info.get("features"):
+                        query_text_parts.append(place_info["features"][:100])
+                    
+                    if query_text_parts:
+                        query_text = " ".join(query_text_parts)
+                        text_embedding = generate_text_embedding(query_text)
+                        
+                        if text_embedding:
+                            related_quests = search_quests_by_rag_text(
+                                text_embedding=text_embedding,
+                                match_threshold=0.6,
+                                match_count=20,
+                                latitude=request.latitude,
+                                longitude=request.longitude,
+                                radius_km=request.radius_km or 15.0
+                            )
+                            
+                            for rag_result in related_quests:
+                                quest_id = rag_result.get("quest", {}).get("id")
+                                if quest_id:
+                                    image_quest_scores[quest_id] = rag_result.get("similarity", 0.0) * 0.3
+                            
+                            logger.info(f"Image-based recommendation found {len(image_quest_scores)} quests")
+            except Exception as e:
+                logger.warning(f"Image-based recommendation failed: {e}")
+        
+        rag_preference_scores = {}
+        if preferences.get("text_query"):
+            try:
+                from services.quest_rag import search_quests_by_rag_text
+                from services.embedding import generate_text_embedding
+                
+                text_query = preferences["text_query"]
+                text_embedding = generate_text_embedding(text_query)
+                
+                if text_embedding:
+                    rag_quests = search_quests_by_rag_text(
+                        text_embedding=text_embedding,
+                        match_threshold=0.6,
+                        match_count=20,
+                        latitude=request.latitude,
+                        longitude=request.longitude,
+                        radius_km=request.radius_km or 15.0
+                    )
+                    
+                    for rag_result in rag_quests:
+                        quest_id = rag_result.get("quest", {}).get("id")
+                        if quest_id:
+                            rag_preference_scores[quest_id] = rag_result.get("similarity", 0.0) * 0.2
+                    
+                    logger.info(f"RAG preference extraction found {len(rag_preference_scores)} quests")
+            except Exception as e:
+                logger.warning(f"RAG preference extraction failed: {e}")
+        
         scored_quests = []
         for quest in candidate_quests:
             quest_id = quest.get("id")
@@ -1052,13 +1132,20 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 reward_score * weights["reward"]
             )
             
-            quest["recommendation_score"] = round(final_score, 3)
+            image_score = image_quest_scores.get(quest_id, 0.0)
+            rag_score = rag_preference_scores.get(quest_id, 0.0)
+            
+            final_score_with_extras = final_score + image_score + rag_score
+            
+            quest["recommendation_score"] = round(final_score_with_extras, 3)
             quest["score_breakdown"] = {
                 "category": round(category_score, 3),
                 "distance": round(distance_score, 3),
                 "diversity": round(diversity_score, 3),
                 "popularity": round(popularity_score, 3),
-                "reward": round(reward_score, 3)
+                "reward": round(reward_score, 3),
+                "image_match": round(image_score, 3) if image_score > 0 else None,
+                "rag_match": round(rag_score, 3) if rag_score > 0 else None
             }
             
             scored_quests.append(quest)

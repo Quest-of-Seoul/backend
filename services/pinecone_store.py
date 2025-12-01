@@ -221,18 +221,22 @@ def search_text_embeddings(
             
             if score >= match_threshold:
                 place_id = match['metadata'].get('place_id')
+                quest_id = match['metadata'].get('quest_id')
                 
                 place = None
                 if place_id:
                     place = get_place_by_id(place_id)
                 
-                similar_places.append({
+                result_item = {
                     "id": match['id'],
                     "place_id": place_id,
+                    "quest_id": quest_id,
                     "similarity": score,
                     "place": place,
                     "rag_text": match['metadata'].get('rag_text', '')
-                })
+                }
+                
+                similar_places.append(result_item)
         
         logger.info(f"Found {len(similar_places)} text matches (threshold: {match_threshold})")
         return similar_places

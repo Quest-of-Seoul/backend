@@ -467,6 +467,16 @@ TTS 스트리밍
 
 **Note:** 인증이 필요하지 않습니다.
 
+**Query Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| query | string | 선택 | RAG 기반 검색 키워드 (예: "역사", "궁궐") |
+| category | string | 선택 | 카테고리 필터 |
+| sort | string | 선택 | 정렬 방식 (default/popularity/distance, 기본: default) |
+| latitude | float | 선택 | 위도 (거리 계산용, sort=distance일 때 필요) |
+| longitude | float | 선택 | 경도 (거리 계산용, sort=distance일 때 필요) |
+
 **Response:**
 
 ```json
@@ -490,9 +500,12 @@ TTS 스트리밍
       "district": "Jongno-gu",
       "address": "서울 종로구 사직로 161",
       "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
-      "place_images": ["https://.../image1.jpg", "https://.../image2.jpg"]
+      "place_images": ["https://.../image1.jpg", "https://.../image2.jpg"],
+      "rag_score": 0.85,  // query 파라미터 사용 시에만 포함 (RAG 유사도 점수)
+      "distance_km": 2.5  // latitude, longitude 제공 시에만 포함 (거리 정보)
     }
-  ]
+  ],
+  "count": 10
 }
 ```
 
@@ -500,6 +513,11 @@ TTS 스트리밍
 - `category`와 `district`는 place 정보에서 가져오며, quest에 이미 있으면 quest 값을 사용합니다
 - `address`, `place_image_url`, `place_images`는 place 정보에서 가져옵니다
 - place 정보가 없으면 해당 필드들이 포함되지 않을 수 있습니다
+- **RAG 검색**: `query` 파라미터 사용 시 RAG 기반 검색이 수행되며, 매칭된 쿼스트만 반환되고 `rag_score` 필드가 포함됩니다. `query`가 없으면 전체 쿼스트를 반환합니다
+- **정렬 옵션**:
+  - `sort=popularity`: `completion_count` 기준 내림차순 정렬
+  - `sort=distance`: `latitude`, `longitude`가 필요하며 거리순 오름차순 정렬
+  - `sort=default` 또는 미지정: `query` 사용 시 RAG 점수순, 아니면 기본 순서
 
 **Status Codes:**
 - 200: 성공
@@ -519,7 +537,8 @@ TTS 스트리밍
 {
   "lat": 37.5665,
   "lon": 126.9780,
-  "radius_km": 50.0
+  "radius_km": 50.0,
+  "query_text": "역사 궁궐"  // 선택: RAG 기반 필터링 키워드
 }
 ```
 
@@ -530,6 +549,7 @@ TTS 스트리밍
 | lat | float | 필수 | 위도 |
 | lon | float | 필수 | 경도 |
 | radius_km | float | 선택 | 검색 반경 (기본: 1.0) |
+| query_text | string | 선택 | RAG 기반 필터링 키워드 (예: "역사", "궁궐", "한옥마을") |
 
 **Response:**
 
@@ -545,12 +565,19 @@ TTS 스트리밍
       "distance_km": 2.0,
       "reward_point": 500,
       "address": "서울특별시 종로구",
-      "description": "..."
+      "description": "...",
+      "rag_score": 0.85,  // query_text 사용 시에만 포함 (RAG 유사도 점수)
+      "rag_match": true   // query_text 사용 시에만 포함 (RAG 매칭 여부)
     }
   ],
   "count": 3
 }
 ```
+
+**Notes:**
+- **RAG 필터링**: `query_text` 파라미터 사용 시 RAG 기반 필터링이 수행되며, 매칭된 쿼스트만 반환됩니다. `rag_score`와 `rag_match` 필드가 각 쿼스트에 포함됩니다
+- **하이브리드 정렬**: `query_text` 사용 시 RAG 점수(60%) + 거리(40%) 가중치로 정렬됩니다
+- **기본 정렬**: `query_text`가 없으면 거리순으로만 정렬되며, `rag_score`와 `rag_match` 필드는 포함되지 않습니다
 
 **Status Codes:**
 - 200: 성공
@@ -1188,7 +1215,8 @@ TTS 스트리밍
   "language": "ko",
   "prefer_url": true,
   "enable_tts": true,
-  "use_cache": true
+  "use_cache": true,
+  "quest_id": 123  // 선택: 쿼스트 진행 중 컨텍스트 활용
 }
 ```
 
@@ -1203,6 +1231,7 @@ TTS 스트리밍
 | prefer_url | boolean | 선택 | 오디오 URL 선호 (기본: true) |
 | enable_tts | boolean | 선택 | TTS 활성화 (기본: true) |
 | use_cache | boolean | 선택 | 캐시 사용 (기본: true) |
+| quest_id | integer | 선택 | 쿼스트 ID (쿼스트 진행 중 컨텍스트 활용) |
 
 **Response (일반):**
 
@@ -1233,6 +1262,33 @@ TTS 스트리밍
 }
 ```
 
+**Response (쿼스트 추천 포함):**
+
+```json
+{
+  "success": true,
+  "description": "경복궁은 조선시대 법궁으로...",
+  "place": {...},
+  "vlm_analysis": "Place Name: 경복궁...",
+  "similar_places": [...],
+  "confidence_score": 0.92,
+  "processing_time_ms": 1250,
+  "vlm_provider": "gpt4v",
+  "audio_url": "https://storage.url/audio.mp3",
+  "recommended_quests": [  // VLM 분석 결과 기반 RAG 추천 쿼스트 (조건부, 관련 쿼스트가 발견될 때만 포함, 최대 5개)
+    {
+      "id": 1,
+      "name": "경복궁",
+      "category": "역사유적",
+      "description": "...",
+      "similarity": 0.85,
+      "distance_km": 0.5,
+      "reward_point": 100
+    }
+  ]
+}
+```
+
 **Response (캐시된 결과):**
 
 ```json
@@ -1252,6 +1308,8 @@ TTS 스트리밍
 - `similar_places`는 벡터 검색 결과로, 각 항목은 `place` 객체와 `similarity` 값을 포함합니다
 - `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다
 - `enable_tts=true`일 때만 `audio` 또는 `audio_url`이 포함됩니다
+- **쿼스트 컨텍스트**: `quest_id`가 제공되면 해당 쿼스트 정보를 VLM 프롬프트에 포함하여 더 정확한 분석을 수행합니다
+- **쿼스트 추천**: `recommended_quests`는 VLM 분석 결과에서 추출한 키워드를 기반으로 RAG 검색을 수행하여 관련 쿼스트를 추천합니다 (최대 5개). 관련 쿼스트가 없으면 빈 배열이거나 필드가 포함되지 않을 수 있습니다
 
 **Status Codes:**
 - 200: 성공
@@ -2579,14 +2637,16 @@ STT + TTS 통합 엔드포인트
     "difficulty": "easy",                      // 선택적: 난이도
     "duration": "half_day",                    // 선택적: 소요 시간
     "districts": ["Jongno-gu", "Gangnam-gu"], // 다중 선택 가능
-    "include_cart": false                      // 선택적: 장바구니의 첫 번째 퀘스트 포함 여부 (기본: false)
+    "include_cart": false,                     // 선택적: 장바구니의 첫 번째 퀘스트 포함 여부 (기본: false)
+    "text_query": "전통 문화"                   // 선택적: RAG 기반 선호도 추출 키워드
   },
   "must_visit_place_id": "place-001",         // 선택적: 필수 방문 장소 ID
   "latitude": 37.5665,                        // 선택적: 현재 GPS 위도
   "longitude": 126.9780,                       // 선택적: 현재 GPS 경도
   "start_latitude": 37.5665,                  // 선택적: 출발 지점 위도 (서울역, 강남역 등)
   "start_longitude": 126.9780,                // 선택적: 출발 지점 경도
-  "radius_km": 15.0                           // 선택적: 검색 반경 (km) - anywhere 클릭 시 사용자가 설정 가능 (기본: 15.0)
+  "radius_km": 15.0,                          // 선택적: 검색 반경 (km) - anywhere 클릭 시 사용자가 설정 가능 (기본: 15.0)
+  "image": "base64_encoded_image"             // 선택적: 이미지 기반 추천 (VLM + RAG)
 }
 ```
 
@@ -2601,7 +2661,9 @@ STT + TTS 통합 엔드포인트
 | preferences.difficulty | string | 선택 | 난이도 (easy, medium, hard) |
 | preferences.duration | string | 선택 | 소요 시간 (half_day, full_day 등) |
 | preferences.include_cart | boolean | 선택 | 장바구니의 첫 번째 퀘스트 포함 여부 (기본: false) |
+| preferences.text_query | string | 선택 | RAG 기반 선호도 추출 키워드 (예: "전통 문화", "역사") |
 | must_visit_place_id | string | 선택 | 필수 방문 장소 ID (출발 위치 기준 거리순으로 자연스럽게 배치) |
+| image | string | 선택 | Base64 인코딩 이미지 (VLM 분석 후 RAG 기반 추천) |
 | latitude | float | 선택 | 현재 GPS 위도 (거리 계산용, 출발 지점 미지정 시 사용) |
 | longitude | float | 선택 | 현재 GPS 경도 (거리 계산용, 출발 지점 미지정 시 사용) |
 | start_latitude | float | 선택 | 출발 지점 위도 (지정 시 사용, 없으면 latitude 사용) |
@@ -2639,7 +2701,9 @@ STT + TTS 통합 엔드포인트
         "distance": 0.9,
         "diversity": 0.8,
         "popularity": 0.7,
-        "reward": 0.5
+        "reward": 0.5,
+        "image_match": 0.25,  // image 파라미터 사용 시에만 포함 (이미지 기반 매칭 점수, 최대 0.3)
+        "rag_match": 0.15     // preferences.text_query 사용 시에만 포함 (RAG 매칭 점수, 최대 0.2)
       }
     },
     {
@@ -2667,7 +2731,9 @@ STT + TTS 통합 엔드포인트
         "distance": 0.8,
         "diversity": 0.7,
         "popularity": 0.6,
-        "reward": 0.5
+        "reward": 0.5,
+        "image_match": null,  // image 파라미터 미사용 시 null
+        "rag_match": null     // preferences.text_query 미사용 시 null
       }
     }
   ],
@@ -2686,6 +2752,8 @@ STT + TTS 통합 엔드포인트
 - **검색 반경 설정**: `radius_km` 파라미터로 검색 반경을 설정할 수 있습니다 (기본: 15.0km). anywhere 클릭 시 사용자가 원하는 거리를 선택하여 전달하면 해당 거리 내에서 추천합니다
 - **점수 계산**: 각 퀘스트는 카테고리 매칭(35%), 다양성(25%), 거리(15%), 인기도(15%), 포인트(10%) 가중치로 종합 점수를 계산합니다
   - 테마 다중 선택 시 여러 테마 중 가장 높은 매칭 점수를 사용
+  - **이미지 기반 추천**: `image` 파라미터 사용 시 VLM으로 이미지를 분석하고, 분석 결과 키워드를 RAG 검색에 활용하여 관련 쿼스트에 가중치(최대 0.3)를 부여합니다. `score_breakdown.image_match` 필드에 점수가 포함됩니다
+  - **텍스트 쿼리 기반 추천**: `preferences.text_query` 사용 시 RAG 검색을 통해 관련 쿼스트에 가중치(최대 0.2)를 부여합니다. `score_breakdown.rag_match` 필드에 점수가 포함됩니다
 - **거리 정보**: `distance_from_start`는 출발 지점으로부터의 거리(km)입니다
 - **중복 체크**: `place_id` 기준으로 중복된 장소는 제외됩니다
 - **최대 4개 제한**: 추천 결과는 최대 4개 퀘스트로 제한됩니다

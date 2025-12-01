@@ -39,6 +39,7 @@ class VLMAnalyzeRequest(BaseModel):
     prefer_url: bool = True
     enable_tts: bool = True
     use_cache: bool = True
+    quest_id: Optional[int] = None
 
 
 class SimilarImageRequest(BaseModel):
@@ -126,11 +127,20 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
             if not any(ep.get("id") == np.get("id") for ep in enhanced_nearby_places):
                 enhanced_nearby_places.append(np)
         
+        quest_context = None
+        if request.quest_id:
+            try:
+                from routers.ai_station import fetch_quest_context
+                quest_context = fetch_quest_context(request.quest_id)
+                logger.info(f"Quest context loaded: quest_id={request.quest_id}")
+            except Exception as e:
+                logger.warning(f"Failed to load quest context: {e}")
+        
         vlm_response = analyze_place_image(
             image_bytes=image_bytes,
             nearby_places=enhanced_nearby_places,
             language="en",
-            quest_context=None
+            quest_context=quest_context
         )
         
         if not vlm_response:
@@ -260,6 +270,49 @@ Based on the above information, please introduce this place in a friendly and en
         except Exception as log_error:
             logger.warning(f"Failed to save log: {log_error}")
         
+        recommended_quests = []
+        try:
+            from services.quest_rag import search_quests_by_rag_text
+            from services.embedding import generate_text_embedding
+            
+            query_text_parts = []
+            if place_info.get("place_name"):
+                query_text_parts.append(place_info["place_name"])
+            if place_info.get("category"):
+                query_text_parts.append(place_info["category"])
+            if place_info.get("features"):
+                query_text_parts.append(place_info["features"][:100])
+            
+            if query_text_parts:
+                query_text = " ".join(query_text_parts)
+                text_embedding = generate_text_embedding(query_text)
+                
+                if text_embedding:
+                    rag_quests = search_quests_by_rag_text(
+                        text_embedding=text_embedding,
+                        match_threshold=0.6,
+                        match_count=5,
+                        latitude=request.latitude,
+                        longitude=request.longitude,
+                        radius_km=10.0
+                    )
+                    
+                    for rag_result in rag_quests:
+                        quest = rag_result.get("quest", {})
+                        recommended_quests.append({
+                            "id": quest.get("id"),
+                            "name": quest.get("name"),
+                            "category": quest.get("category"),
+                            "description": quest.get("description", "")[:200],
+                            "similarity": rag_result.get("similarity", 0.0),
+                            "distance_km": quest.get("distance_km"),
+                            "reward_point": quest.get("reward_point")
+                        })
+                    
+                    logger.info(f"Found {len(recommended_quests)} recommended quests via RAG")
+        except Exception as e:
+            logger.warning(f"Failed to get recommended quests: {e}")
+        
         response_data = {
             "success": True,
             "description": final_description,
@@ -270,6 +323,9 @@ Based on the above information, please introduce this place in a friendly and en
             "processing_time_ms": processing_time_ms,
             "vlm_provider": "gpt4v"
         }
+        
+        if recommended_quests:
+            response_data["recommended_quests"] = recommended_quests
         
         if request.prefer_url and audio_url:
             response_data["audio_url"] = audio_url
