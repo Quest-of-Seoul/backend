@@ -91,7 +91,7 @@ def speech_to_text(
         response = client.recognize(config=config, audio=audio)
         
         if not response.results:
-            logger.warning("No transcription results")
+            logger.warning(f"No transcription results from Google STT API (audio length: {len(audio_bytes)} bytes, encoding: {encoding}, language: {language_code})")
             return None
         
         transcript = " ".join(
@@ -100,8 +100,14 @@ def speech_to_text(
             if result.alternatives
         )
         
-        logger.info(f"STT transcribed: {len(transcript)} chars")
-        return transcript.strip()
+        transcript = transcript.strip()
+        
+        if not transcript:
+            logger.warning(f"STT transcription resulted in empty string after stripping (audio length: {len(audio_bytes)} bytes, encoding: {encoding}, language: {language_code})")
+            return None
+        
+        logger.info(f"STT transcribed: '{transcript}' ({len(transcript)} chars)")
+        return transcript
     
     except Exception as e:
         logger.error(f"STT error: {e}", exc_info=True)
@@ -116,6 +122,12 @@ def speech_to_text_from_base64(
 ) -> Optional[str]:
     try:
         audio_bytes = base64.b64decode(audio_base64)
+        
+        # 오디오 길이 검증 (너무 짧은 오디오는 STT 실패 가능성이 높음)
+        if len(audio_bytes) < 100:  # 약 100 bytes 미만은 너무 짧음
+            logger.warning(f"Audio too short for STT: {len(audio_bytes)} bytes")
+            return None
+        
         return speech_to_text(audio_bytes, language_code, sample_rate_hertz, encoding)
     except Exception as e:
         logger.error(f"Base64 decode error: {e}", exc_info=True)

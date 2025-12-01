@@ -803,38 +803,76 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
     try:
         logger.info(f"STT+TTS request: {user_id}")
         
+        # STT 수행
         transcribed_text = speech_to_text_from_base64(
             audio_base64=request.audio,
             language_code=request.language_code
         )
         
-        if not transcribed_text:
-            raise HTTPException(status_code=400, detail="STT transcription failed")
+        # STT 실패 시에만 에러 반환 (빈 문자열 또는 None인 경우)
+        if not transcribed_text or not transcribed_text.strip():
+            logger.warning(f"STT transcription failed or empty: transcribed_text='{transcribed_text}'")
+            raise HTTPException(
+                status_code=400, 
+                detail="STT transcription failed: No speech detected or audio quality too poor. Please try speaking more clearly or check your microphone."
+            )
         
+        transcribed_text = transcribed_text.strip()
+        logger.info(f"STT transcribed text: '{transcribed_text}' ({len(transcribed_text)} chars)")
+        
+        # 전사 텍스트 길이 검증 (2자 이하인 경우 TTS 건너뛰기)
+        text_length = len(transcribed_text)
+        if text_length <= 2:
+            logger.warning(f"Transcribed text is too short ({text_length} chars), skipping TTS")
+            return {
+                "success": True,
+                "transcribed_text": transcribed_text,
+                "audio_url": None,
+                "audio": None,
+                "warning": "Transcribed text is too short for TTS generation"
+            }
+        
+        # TTS 생성 시도 (실패해도 STT 결과는 반환)
         audio_url = None
         audio_base64 = None
+        tts_error_message = None
         
-        if request.prefer_url:
-            audio_url, audio_base64 = text_to_speech_url(
-                text=transcribed_text,
-                language_code=request.language_code,
-                upload_to_storage=True
-            )
-        else:
-            audio_base64 = text_to_speech(
-                text=transcribed_text,
-                language_code=request.language_code
-            )
+        try:
+            if request.prefer_url:
+                audio_url, audio_base64 = text_to_speech_url(
+                    text=transcribed_text,
+                    language_code=request.language_code,
+                    upload_to_storage=True
+                )
+                logger.info(f"TTS generated: url={audio_url is not None}, base64={audio_base64 is not None}")
+            else:
+                audio_base64 = text_to_speech(
+                    text=transcribed_text,
+                    language_code=request.language_code
+                )
+                logger.info(f"TTS generated: base64={audio_base64 is not None}")
+            
+            # TTS 생성 실패 확인
+            if not audio_base64:
+                tts_error_message = "TTS generation returned None"
+                logger.warning(tts_error_message)
+        except Exception as tts_error:
+            tts_error_message = f"TTS generation failed: {str(tts_error)}"
+            logger.error(f"TTS generation error: {tts_error}", exc_info=True)
         
-        if not audio_base64:
-            raise HTTPException(status_code=500, detail="TTS generation failed")
-        
-        return {
+        # STT 성공 시 항상 전사 텍스트 반환 (TTS 실패해도)
+        response = {
             "success": True,
             "transcribed_text": transcribed_text,
             "audio_url": audio_url,
             "audio": audio_base64
         }
+        
+        # TTS 실패 시 warning 필드 추가
+        if tts_error_message:
+            response["warning"] = tts_error_message
+        
+        return response
     
     except HTTPException:
         raise
