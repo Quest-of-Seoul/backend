@@ -597,40 +597,40 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
             quest_result = db.table("quests").select("reward_point, name").eq("id", quest_id).single().execute()
             quest_data = quest_result.data
 
-            # Check if already completed
+            # Check if already completed (정보로만 사용, 보상 지급은 항상 수행)
             user_quest = db.table("user_quests") \
                 .select("status") \
                 .eq("user_id", user_id) \
                 .eq("quest_id", quest_id) \
                 .limit(1) \
                 .execute()
-
+            
             already_completed = bool(user_quest.data and user_quest.data[0].get("status") == "completed")
 
-            if not already_completed:
-                timestamp = datetime.now().isoformat()
-                if user_quest.data:
-                    db.table("user_quests").update({
-                        "status": "completed",
-                        "completed_at": timestamp
-                    }).eq("user_id", user_id).eq("quest_id", quest_id).execute()
-                else:
-                    db.table("user_quests").insert({
-                        "user_id": user_id,
-                        "quest_id": quest_id,
-                        "status": "completed",
-                        "started_at": timestamp,
-                        "completed_at": timestamp
-                    }).execute()
+            # 항상 완료 상태로 갱신 (여러 번 푼 경우에도 최신 completed_at 유지)
+            timestamp = datetime.now().isoformat()
+            if user_quest.data:
+                db.table("user_quests").update({
+                    "status": "completed",
+                    "completed_at": timestamp
+                }).eq("user_id", user_id).eq("quest_id", quest_id).execute()
+            else:
+                db.table("user_quests").insert({
+                    "user_id": user_id,
+                    "quest_id": quest_id,
+                    "status": "completed",
+                    "started_at": timestamp,
+                    "completed_at": timestamp
+                }).execute()
 
-                # Award points based on quiz score (not fixed reward_point)
-                points_awarded = new_score  # Award the actual quiz score as points
-                if points_awarded > 0:
-                    db.table("points").insert({
-                        "user_id": user_id,
-                        "value": points_awarded,
-                        "reason": f"퀘스트 완료: {quest_data.get('name', '')} ({points_awarded}점)"
-                    }).execute()
+            # 🔥 매번 퀴즈를 완주할 때마다 실제 퀴즈 점수(new_score)만큼 포인트 지급
+            points_awarded = new_score
+            if points_awarded > 0:
+                db.table("points").insert({
+                    "user_id": user_id,
+                    "value": points_awarded,
+                    "reason": f"퀘스트 완료: {quest_data.get('name', '')} ({points_awarded}점)"
+                }).execute()
 
             balance_result = db.rpc("get_user_points", {"user_uuid": user_id}).execute()
             new_balance = balance_result.data if balance_result.data is not None else 0
