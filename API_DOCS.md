@@ -2355,6 +2355,7 @@ STT + TTS 통합 엔드포인트
 | longitude | float | 선택 | 현재 GPS 경도 (거리 계산용, 출발 지점 미지정 시 사용) |
 | start_latitude | float | 선택 | 출발 지점 위도 (지정 시 사용, 없으면 latitude 사용) |
 | start_longitude | float | 선택 | 출발 지점 경도 (지정 시 사용, 없으면 longitude 사용) |
+| radius_km | float | 선택 | 검색 반경 (km) - anywhere 클릭 시 사용자가 설정 가능 (기본: 15.0) |
 
 **Response:**
 
@@ -2381,6 +2382,7 @@ STT + TTS 통합 엔드포인트
       "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB986.webp",
       "distance_from_start": 1.5,
       "recommendation_score": 0.85,
+      "is_night_view": false,  // 야경 장소 여부 (4번째 장소가 야경 장소일 수 있음)
       "score_breakdown": {
         "category": 1.0,
         "distance": 0.9,
@@ -2408,6 +2410,7 @@ STT + TTS 통합 엔드포인트
       "place_image_url": "https://ak-d.tripcdn.com/images/0104p120008ars39uB987.webp",
       "distance_from_start": 2.3,
       "recommendation_score": 0.75,
+      "is_night_view": true,  // 야경 장소 여부 (4번째 장소가 야경 장소일 수 있음)
       "score_breakdown": {
         "category": 0.9,
         "distance": 0.8,
@@ -2428,7 +2431,8 @@ STT + TTS 통합 엔드포인트
 - **테마 다중 선택**: `theme`을 리스트로 전달하면 여러 테마 중 하나라도 매칭되면 높은 점수 부여 (3~4개 권장)
 - **출발 지점 기준 정렬**: `start_latitude`와 `start_longitude`가 지정되면 해당 지점 기준으로 가까운 순 정렬, 없으면 `latitude`와 `longitude` 사용
 - **필수 방문 장소**: `must_visit_place_id`가 지정되면 항상 추천 결과에 포함되며, 출발 위치 기준 거리순으로 자연스럽게 배치됨 (1~4번째 중 적절한 위치)
-- **야경 특별 장소**: 마지막 장소(4번째)는 자동으로 야경 특별 장소로 추천됩니다 (metadata, description, name에서 야경 관련 키워드 검색)
+- **야경 특별 장소**: 마지막 장소(4번째)는 자동으로 야경 특별 장소로 추천됩니다 (metadata, description, name에서 야경 관련 키워드 검색). 각 퀘스트의 `is_night_view` 필드로 야경 장소 여부를 확인할 수 있습니다
+- **검색 반경 설정**: `radius_km` 파라미터로 검색 반경을 설정할 수 있습니다 (기본: 15.0km). anywhere 클릭 시 사용자가 원하는 거리를 선택하여 전달하면 해당 거리 내에서 추천합니다
 - **점수 계산**: 각 퀘스트는 카테고리 매칭(30%), 거리(25%), 다양성(20%), 인기도(15%), 포인트(10%) 가중치로 종합 점수를 계산합니다
   - 테마 다중 선택 시 여러 테마 중 가장 높은 매칭 점수를 사용
 - **거리 정보**: `distance_from_start`는 출발 지점으로부터의 거리(km)입니다
