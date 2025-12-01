@@ -612,8 +612,30 @@ async def quest_vlm_chat(request: QuestVLMChatRequest, user_id: str = Depends(ge
         place_info = extract_place_info_from_vlm_response(vlm_response)
         matched_place = None
         
+        quest_place = quest.get("place") or {}
+        quest_place_id = quest.get("place_id") or (quest_place.get("id") if quest_place else None)
+        
         if place_info.get("place_name"):
-            matched_place = get_place_by_name(place_info["place_name"], fuzzy=True)
+            candidate_place = get_place_by_name(place_info["place_name"], fuzzy=True)
+            
+            if candidate_place:
+                candidate_place_id = candidate_place.get("id")
+                if quest_place_id and candidate_place_id == quest_place_id:
+                    matched_place = candidate_place
+                    logger.info(f"Matched place verified: {candidate_place.get('name')} (quest place_id: {quest_place_id})")
+                else:
+                    logger.warning(f"Matched place {candidate_place.get('name')} (id: {candidate_place_id}) does not match quest place_id: {quest_place_id}")
+                    if quest_place_id:
+                        from services.db import get_place_by_id
+                        matched_place = get_place_by_id(quest_place_id)
+                        if matched_place:
+                            logger.info(f"Using quest's actual place: {matched_place.get('name')}")
+        
+        if not matched_place and quest_place_id:
+            from services.db import get_place_by_id
+            matched_place = get_place_by_id(quest_place_id)
+            if matched_place:
+                logger.info(f"Using quest's actual place (no VLM match): {matched_place.get('name')}")
         
         final_description = vlm_response
         if matched_place:
