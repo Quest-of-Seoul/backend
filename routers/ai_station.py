@@ -59,6 +59,7 @@ class STTTTSRequest(BaseModel):
 class RouteRecommendRequest(BaseModel):
     preferences: dict
     must_visit_place_id: Optional[str] = None
+    must_visit_quest_id: Optional[int] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     start_latitude: Optional[float] = None
@@ -850,7 +851,20 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         db = get_db()
         
         must_visit_quest = None
-        if request.must_visit_place_id:
+        if request.must_visit_quest_id:
+            # must_visit_quest_id가 있으면 직접 quest를 가져옴
+            quest_result = db.table("quests").select("*, places(*)").eq("id", request.must_visit_quest_id).execute()
+            if quest_result.data and len(quest_result.data) > 0:
+                must_visit_quest = dict(quest_result.data[0])
+                place = must_visit_quest.get("places")
+                if place:
+                    if isinstance(place, list) and len(place) > 0:
+                        place = place[0]
+                    if isinstance(place, dict):
+                        must_visit_quest["district"] = place.get("district")
+                        must_visit_quest["place_image_url"] = place.get("image_url")
+        elif request.must_visit_place_id:
+            # must_visit_place_id가 있으면 place를 통해 quest를 가져옴
             place_result = db.table("places").select("*, quests(*)").eq("id", request.must_visit_place_id).execute()
             if place_result.data and len(place_result.data) > 0:
                 place = place_result.data[0]
@@ -1335,17 +1349,38 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                         final_quests.append(quest)
                 
                 if must_visit_quest_id and not any(q.get("id") == must_visit_quest_id for q in final_quests):
-                    for quest in regular_quests:
-                        if quest.get("id") == must_visit_quest_id:
-                            inserted = False
-                            for i, q in enumerate(final_quests):
-                                if q.get("distance_from_start", float('inf')) > quest.get("distance_from_start", float('inf')):
-                                    final_quests.insert(i, quest)
-                                    inserted = True
-                                    break
-                            if not inserted:
-                                final_quests.append(quest)
-                            break
+                    # must_visit_quest를 직접 추가
+                    if must_visit_quest:
+                        # must_visit_quest에 distance_from_start 계산
+                        if start_lat and start_lon:
+                            quest_lat = must_visit_quest.get("latitude")
+                            quest_lon = must_visit_quest.get("longitude")
+                            if quest_lat and quest_lon:
+                                R = 6371
+                                lat1_rad = math.radians(start_lat)
+                                lat2_rad = math.radians(float(quest_lat))
+                                delta_lat = math.radians(float(quest_lat) - start_lat)
+                                delta_lon = math.radians(float(quest_lon) - start_lon)
+                                a = (math.sin(delta_lat / 2) ** 2 + 
+                                     math.cos(lat1_rad) * math.cos(lat2_rad) * 
+                                     math.sin(delta_lon / 2) ** 2)
+                                c = 2 * math.asin(math.sqrt(a))
+                                must_visit_quest["distance_from_start"] = R * c
+                            else:
+                                must_visit_quest["distance_from_start"] = float('inf')
+                        else:
+                            must_visit_quest["distance_from_start"] = float('inf')
+                        
+                        # distance_from_start 기준으로 적절한 위치에 삽입
+                        inserted = False
+                        for i, q in enumerate(final_quests):
+                            if q.get("distance_from_start", float('inf')) > must_visit_quest.get("distance_from_start", float('inf')):
+                                final_quests.insert(i, must_visit_quest)
+                                inserted = True
+                                break
+                        if not inserted:
+                            final_quests.append(must_visit_quest)
+                        logger.info(f"Added must_visit_quest (id: {must_visit_quest_id}) to final_quests")
                 
                 if night_quest_in_list:
                     if len(final_quests) < 4:
@@ -1374,6 +1409,32 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 recommended_quests = []
                 must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
                 remaining_count = 3
+                
+                # must_visit_quest를 먼저 추가
+                if must_visit_quest_id and must_visit_quest:
+                    # must_visit_quest에 distance_from_start 계산
+                    if start_lat and start_lon:
+                        quest_lat = must_visit_quest.get("latitude")
+                        quest_lon = must_visit_quest.get("longitude")
+                        if quest_lat and quest_lon:
+                            R = 6371
+                            lat1_rad = math.radians(start_lat)
+                            lat2_rad = math.radians(float(quest_lat))
+                            delta_lat = math.radians(float(quest_lat) - start_lat)
+                            delta_lon = math.radians(float(quest_lon) - start_lon)
+                            a = (math.sin(delta_lat / 2) ** 2 + 
+                                 math.cos(lat1_rad) * math.cos(lat2_rad) * 
+                                 math.sin(delta_lon / 2) ** 2)
+                            c = 2 * math.asin(math.sqrt(a))
+                            must_visit_quest["distance_from_start"] = R * c
+                        else:
+                            must_visit_quest["distance_from_start"] = float('inf')
+                    else:
+                        must_visit_quest["distance_from_start"] = float('inf')
+                    # 중복 확인 후 추가
+                    if not any(q.get("id") == must_visit_quest_id for q in recommended_quests):
+                        recommended_quests.append(must_visit_quest)
+                        logger.info(f"Added must_visit_quest (id: {must_visit_quest_id}) to recommended_quests (AI fallback)")
                 
                 if start_lat and start_lon and len(regular_quests) > remaining_count:
                     distance_zones = {
@@ -1457,6 +1518,32 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             recommended_quests = []
             must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
             remaining_count = 3
+            
+            # must_visit_quest를 먼저 추가
+            if must_visit_quest_id and must_visit_quest:
+                # must_visit_quest에 distance_from_start 계산
+                if start_lat and start_lon:
+                    quest_lat = must_visit_quest.get("latitude")
+                    quest_lon = must_visit_quest.get("longitude")
+                    if quest_lat and quest_lon:
+                        R = 6371
+                        lat1_rad = math.radians(start_lat)
+                        lat2_rad = math.radians(float(quest_lat))
+                        delta_lat = math.radians(float(quest_lat) - start_lat)
+                        delta_lon = math.radians(float(quest_lon) - start_lon)
+                        a = (math.sin(delta_lat / 2) ** 2 + 
+                             math.cos(lat1_rad) * math.cos(lat2_rad) * 
+                             math.sin(delta_lon / 2) ** 2)
+                        c = 2 * math.asin(math.sqrt(a))
+                        must_visit_quest["distance_from_start"] = R * c
+                    else:
+                        must_visit_quest["distance_from_start"] = float('inf')
+                else:
+                    must_visit_quest["distance_from_start"] = float('inf')
+                # 중복 확인 후 추가
+                if not any(q.get("id") == must_visit_quest_id for q in recommended_quests):
+                    recommended_quests.append(must_visit_quest)
+                    logger.info(f"Added must_visit_quest (id: {must_visit_quest_id}) to recommended_quests (score-based)")
             
             if start_lat and start_lon and len(regular_quests) > remaining_count:
                 distance_zones = {
