@@ -115,7 +115,43 @@ def build_place_analysis_prompt(
     language: str = "en",
     quest_context: Optional[Dict] = None
 ) -> str:    
-    prompt = """You are a Seoul tourism expert. Analyze this image and provide:
+    if quest_context:
+        from services.quest_rag import generate_quest_rag_text
+        
+        quest_place = quest_context.get("place", {})
+        quest_name = quest_context.get("name") or quest_context.get("title", "")
+        place_name = quest_place.get("name", "") if quest_place else ""
+        quest_location = place_name or quest_name
+        
+        quest_rag_text = generate_quest_rag_text(quest_context, quest_place)
+        
+        prompt = f"""You are a Seoul tourism expert. 
+
+[IMPORTANT CONTEXT]
+This image was taken INSIDE or AT the quest location: "{quest_location}"
+The user is asking about something WITHIN this quest location (e.g., a specific feature, object, facility, or element inside the place).
+
+[Quest Location Information]
+{quest_rag_text}
+
+[Your Task]
+Analyze this image with the understanding that:
+1. The image shows something INSIDE or AT "{quest_location}"
+2. It could be a specific element, feature, object, facility, or detail within this quest location
+3. Examples: a lock on a fence (if quest is Namsan Tower), a specific building detail, a statue, a sign, a specific area within the place, etc.
+4. Identify what specific element/feature/object is shown in the image
+5. Describe how it relates to the quest location "{quest_location}"
+6. Provide historical/cultural context if relevant
+
+Response Format:
+Place Name: [the quest location name: {quest_location}]
+Specific Element: [what specific element/feature/object is shown in the image, e.g., "Love Locks", "Observation Deck", "Specific Statue", etc.]
+Category: [tourist spot/restaurant/cafe/park/historic site/feature within location, etc.]
+Description: [2-3 sentences describing the specific element and its relationship to the quest location]
+Features: [visual characteristics and special points of the element]
+Confidence: [high/medium/low]"""
+    else:
+        prompt = """You are a Seoul tourism expert. Analyze this image and provide:
 
 1. Identify the exact place/location
 2. Describe architectural style, colors, distinctive features
@@ -128,16 +164,6 @@ Category: [tourist spot/restaurant/cafe/park/historic site, etc.]
 Description: [2-3 sentences describing the place]
 Features: [visual characteristics and special points]
 Confidence: [high/medium/low]"""
-    
-    if quest_context:
-        from services.quest_rag import generate_quest_rag_text
-        
-        quest_place = quest_context.get("place", {})
-        quest_rag_text = generate_quest_rag_text(quest_context, quest_place)
-        
-        prompt += "\n\n[Quest Information - Use this data to analyze the image]\n"
-        prompt += quest_rag_text
-        prompt += "\n\nIMPORTANT: Analyze the image based on the above quest information. Verify if the image matches this quest place and provide detailed analysis using the quest data."
     
     if nearby_places:
         places_text = "\n".join([
