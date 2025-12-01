@@ -2659,13 +2659,41 @@ STT + TTS 통합 엔드포인트
   "success": true,
   "transcribed_text": "경복궁에 대해 알려줘",
   "audio_url": "https://storage.url/audio.mp3_or_null",
-  "audio": "base64_encoded_audio"
+  "audio": "base64_encoded_audio",
+  "warning": null  // TTS 실패 시 또는 텍스트가 너무 짧을 때 에러 메시지 포함
+}
+```
+
+**Response (텍스트가 너무 짧은 경우):**
+
+```json
+{
+  "success": true,
+  "transcribed_text": "안",
+  "audio_url": null,
+  "audio": null,
+  "warning": "Transcribed text is too short for TTS generation"
+}
+```
+
+**Response (TTS 실패 시):**
+
+```json
+{
+  "success": true,
+  "transcribed_text": "경복궁에 대해 알려줘",
+  "audio_url": null,
+  "audio": null,
+  "warning": "TTS generation failed: ..."
 }
 ```
 
 **Notes:**
 - `prefer_url=true`일 때는 `audio_url`과 `audio` 모두 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다 (`audio_url`은 `null`)
 - 응답에는 항상 `audio` 필드가 포함되며, `audio_url`은 `prefer_url=true`일 때만 포함됩니다
+- STT 실패 시 400 에러가 반환됩니다
+- 전사된 텍스트가 2자 이하인 경우 TTS는 건너뛰고 `warning` 필드가 포함됩니다
+- TTS 생성 실패 시에도 STT 결과는 반환되며, `warning` 필드에 에러 메시지가 포함됩니다
 
 **Status Codes:**
 - 200: 성공
@@ -2700,6 +2728,7 @@ STT + TTS 통합 엔드포인트
     "text_query": "전통 문화"                   // 선택적: RAG 기반 선호도 추출 키워드
   },
   "must_visit_place_id": "place-001",         // 선택적: 필수 방문 장소 ID
+  "must_visit_quest_id": 1,                   // 선택적: 필수 방문 퀘스트 ID
   "latitude": 37.5665,                        // 선택적: 현재 GPS 위도
   "longitude": 126.9780,                       // 선택적: 현재 GPS 경도
   "start_latitude": 37.5665,                  // 선택적: 출발 지점 위도 (서울역, 강남역 등)
@@ -2722,6 +2751,7 @@ STT + TTS 통합 엔드포인트
 | preferences.include_cart | boolean | 선택 | 장바구니의 첫 번째 퀘스트 포함 여부 (기본: false) |
 | preferences.text_query | string | 선택 | RAG 기반 선호도 추출 키워드 (예: "전통 문화", "역사") |
 | must_visit_place_id | string | 선택 | 필수 방문 장소 ID (출발 위치 기준 거리순으로 자연스럽게 배치) |
+| must_visit_quest_id | integer | 선택 | 필수 방문 퀘스트 ID (출발 위치 기준 거리순으로 자연스럽게 배치) |
 | image | string | 선택 | Base64 인코딩 이미지 (VLM 분석 후 RAG 기반 추천) |
 | latitude | float | 선택 | 현재 GPS 위도 (거리 계산용, 출발 지점 미지정 시 사용) |
 | longitude | float | 선택 | 현재 GPS 경도 (거리 계산용, 출발 지점 미지정 시 사용) |
@@ -2806,7 +2836,7 @@ STT + TTS 통합 엔드포인트
 - `is_read_only: true`로 저장되어 수정 불가
 - **테마 다중 선택**: `theme`을 리스트로 전달하면 여러 테마 중 하나라도 매칭되면 높은 점수 부여 (3~4개 권장)
 - **출발 지점 기준 정렬**: `start_latitude`와 `start_longitude`가 지정되면 해당 지점 기준으로 가까운 순 정렬, 없으면 `latitude`와 `longitude` 사용
-- **필수 방문 장소**: `must_visit_place_id`가 지정되면 항상 추천 결과에 포함되며, 출발 위치 기준 거리순으로 자연스럽게 배치됨 (1~4번째 중 적절한 위치)
+- **필수 방문 장소/퀘스트**: `must_visit_place_id` 또는 `must_visit_quest_id`가 지정되면 항상 추천 결과에 포함되며, 출발 위치 기준 거리순으로 자연스럽게 배치됨 (1~4번째 중 적절한 위치). `must_visit_quest_id`가 우선순위가 높습니다
 - **야경 특별 장소**: 마지막 장소(4번째)는 자동으로 야경 특별 장소로 추천됩니다 (metadata, description, name에서 야경 관련 키워드 검색). 각 퀘스트의 `is_night_view` 필드로 야경 장소 여부를 확인할 수 있습니다
 - **검색 반경 설정**: `radius_km` 파라미터로 검색 반경을 설정할 수 있습니다 (기본: 15.0km). anywhere 클릭 시 사용자가 원하는 거리를 선택하여 전달하면 해당 거리 내에서 추천합니다
 - **점수 계산**: 각 퀘스트는 카테고리 매칭(35%), 다양성(25%), 거리(15%), 인기도(15%), 포인트(10%) 가중치로 종합 점수를 계산합니다
