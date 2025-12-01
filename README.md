@@ -5,8 +5,8 @@ FastAPI 기반 AI 서비스 백엔드
 ## 개요
 
 AI 기능 전담 마이크로서비스
-- VLM 이미지 분석 (GPT-4V)
-- AI 도슨트 (Gemini)
+- VLM 이미지 분석 (GPT-4o-mini)
+- AI 도슨트 (OpenAI ChatGPT)
 - AI 장소 추천 시스템 (CLIP + Pinecone)
 - TTS (Google Cloud)
 - 벡터 검색 (Pinecone)
@@ -19,8 +19,7 @@ Client (iOS/Android)
 FastAPI Backend
     ├── Supabase (PostgreSQL)
     ├── Pinecone (Vector DB)
-    ├── OpenAI (GPT-4o-mini)
-    ├── Google Gemini (AI Docent)
+    ├── OpenAI (GPT-4o-mini) - AI Docent & VLM
     └── Google Cloud TTS
 ```
 
@@ -46,7 +45,7 @@ backend/
 │   └── reward.py           # 리워드 시스템
 │
 ├── services/                # 비즈니스 로직
-│   ├── ai.py               # Gemini AI
+│   ├── ai.py               # OpenAI ChatGPT
 │   ├── vlm.py              # GPT-4o-mini
 │   ├── embedding.py        # CLIP 임베딩
 │   ├── recommendation.py   # 추천 알고리즘
@@ -77,7 +76,6 @@ PINECONE_API_KEY=your-pinecone-api-key
 
 # AI Services
 OPENAI_API_KEY=sk-your-openai-api-key
-GOOGLE_API_KEY=your-google-api-key
 
 # Text-to-Speech
 GOOGLE_APPLICATION_CREDENTIALS=./google-tts-credentials.json
@@ -125,7 +123,6 @@ API 문서:
 | SUPABASE_SERVICE_KEY | Supabase 서비스 키 | 필수 |
 | PINECONE_API_KEY | Pinecone API 키 | 필수 |
 | OPENAI_API_KEY | OpenAI API 키 (GPT-4o-mini) | 필수 |
-| GOOGLE_API_KEY | Google Gemini API 키 | 필수 |
 | GOOGLE_APPLICATION_CREDENTIALS | TTS 인증 파일 경로 | 필수 |
 | PORT | 서버 포트 | 선택 (기본: 8000) |
 | PRELOAD_CLIP_MODEL | CLIP 모델 사전 로드 | 선택 (기본: false) |
@@ -135,8 +132,7 @@ API 문서:
 - **FastAPI**: 웹 프레임워크
 - **Supabase**: PostgreSQL 데이터베이스
 - **Pinecone**: 벡터 검색
-- **GPT-4o-mini**: 이미지 분석 (비용 효율적)
-- **Gemini 2.5 Flash**: AI 도슨트
+- **GPT-4o-mini**: 이미지 분석 및 AI 도슨트
 - **CLIP**: 이미지 임베딩 (512차원)
 - **Google Cloud TTS**: 음성 합성
 

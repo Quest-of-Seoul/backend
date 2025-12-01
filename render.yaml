@@ -28,8 +28,6 @@ services:
       # AI Services
       - key: OPENAI_API_KEY
         sync: false
-      - key: GOOGLE_API_KEY
-        sync: false
       # Text-to-Speech
       - key: GOOGLE_APPLICATION_CREDENTIALS
         value: /etc/secrets/google-tts-credentials.json

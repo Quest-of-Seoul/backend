@@ -1,6 +1,5 @@
 """AI Service"""
 
-import google.generativeai as genai
 import os
 import logging
 import json
@@ -8,21 +7,31 @@ from typing import Optional, List, Dict, Set
 
 logger = logging.getLogger(__name__)
 
-api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-if api_key:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    GEMINI_AVAILABLE = True
-else:
-    logger.warning("GOOGLE_API_KEY or GEMINI_API_KEY not set")
-    model = None
-    GEMINI_AVAILABLE = False
+openai_client = None
+OPENAI_AVAILABLE = False
+
+try:
+    from openai import OpenAI
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        openai_client = OpenAI(api_key=api_key)
+        OPENAI_AVAILABLE = True
+    else:
+        logger.warning("OPENAI_API_KEY not set")
+except ImportError:
+    logger.warning("OpenAI not installed")
+except Exception as e:
+    logger.warning(f"Failed to initialize OpenAI: {e}")
 
 def generate_docent_message(
     landmark: str,
     user_message: Optional[str] = None,
     language: str = "en"
 ) -> str:    
+    if not OPENAI_AVAILABLE:
+        logger.error("OpenAI not available")
+        return "Cannot generate response."
+    
     base_prompt = f"""You are a friendly AI docent for '{landmark}'.
 
 {f'Question: {user_message}' if user_message else 'Please introduce this place.'}
@@ -30,14 +39,30 @@ def generate_docent_message(
 Provide an engaging response in 3-4 sentences."""
 
     try:
-        response = model.generate_content(base_prompt)
-        return response.text
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": f"You are a friendly AI docent for '{landmark}'."},
+                {"role": "user", "content": base_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        return response.choices[0].message.content
     except Exception as e:
-        logger.error(f"Gemini error: {e}", exc_info=True)
+        logger.error(f"OpenAI error: {e}", exc_info=True)
         return "Cannot generate response."
 
 
 def generate_quiz(landmark: str, language: str = "en") -> dict:    
+    if not OPENAI_AVAILABLE:
+        logger.error("OpenAI not available")
+        return {
+            "question": "Cannot generate quiz.",
+            "options": ["A", "B", "C", "D"],
+            "correct_answer": 0
+        }
+    
     prompt = f"""Create a quiz about {landmark}.
 
 Return in JSON format:
@@ -49,8 +74,15 @@ Return in JSON format:
 }}"""
 
     try:
-        response = model.generate_content(prompt)
-        text = response.text.strip()
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        text = response.choices[0].message.content.strip()
         
         if "```" in text:
             text = text.split("```")[1]
@@ -74,8 +106,8 @@ def generate_quest_quizzes(
     language: str = "en",
     count: int = 5
 ) -> List[Dict]:
-    if not GEMINI_AVAILABLE:
-        logger.warning("Gemini not available, cannot generate quizzes")
+    if not OPENAI_AVAILABLE:
+        logger.warning("OpenAI not available, cannot generate quizzes")
         return []
     
     try:
@@ -106,8 +138,15 @@ Return in JSON format:
     ]
 }}"""
 
-        response = model.generate_content(prompt)
-        text = response.text.strip()
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=2000
+        )
+        text = response.choices[0].message.content.strip()
         
         if "```" in text:
             text = text.split("```")[1]
@@ -147,8 +186,8 @@ def generate_route_recommendation(
     completed_quest_ids: set,
     language: str = "en"
 ) -> list:
-    if not GEMINI_AVAILABLE:
-        logger.warning("Gemini not available, using fallback")
+    if not OPENAI_AVAILABLE:
+        logger.warning("OpenAI not available, using fallback")
         return []
     
     try:
@@ -213,8 +252,15 @@ Return in JSON format:
     "route_order": "Visit order explanation"
 }}"""
         
-        response = model.generate_content(prompt)
-        text = response.text.strip()
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1500
+        )
+        text = response.choices[0].message.content.strip()
         
         if "```" in text:
             text = text.split("```")[1]

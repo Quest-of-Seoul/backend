@@ -214,9 +214,9 @@ Based on the above information, please introduce this place in a friendly and en
                     user_message=enhancement_prompt,
                     language="en"
                 )
-                logger.info("Description enhanced by Gemini")
+                logger.info("Description enhanced by OpenAI")
             except Exception as e:
-                logger.warning(f"Gemini enhancement failed: {e}")
+                logger.warning(f"OpenAI enhancement failed: {e}")
         
         audio_url = None
         audio_base64 = None
