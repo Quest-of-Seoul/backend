@@ -43,7 +43,6 @@ def search_similar_pinecone(
     match_count: int = 5,
     filter_dict: Optional[Dict] = None
 ) -> List[Dict]:
-    """Vector similarity search"""
     try:
         index = get_pinecone_index()
         
@@ -94,7 +93,6 @@ def upsert_pinecone(
     embedding: List[float],
     metadata: Dict
 ) -> Optional[str]:
-    """Save vector to Pinecone"""
     try:
         index = get_pinecone_index()
         
@@ -118,7 +116,6 @@ def upsert_pinecone(
 
 
 def upsert_batch_pinecone(vectors: List[tuple], batch_size: int = 100) -> int:
-    """Batch upsert vectors"""
     try:
         index = get_pinecone_index()
         
@@ -145,7 +142,6 @@ def upsert_batch_pinecone(vectors: List[tuple], batch_size: int = 100) -> int:
 
 
 def get_index_stats() -> Dict:
-    """Get index statistics"""
     try:
         index = get_pinecone_index()
         stats = index.describe_index_stats()
@@ -169,7 +165,6 @@ def get_index_stats() -> Dict:
 
 
 def fetch_vector_by_id(vector_id: str) -> Optional[Dict]:
-    """Fetch vector by ID"""
     try:
         index = get_pinecone_index()
         result = index.fetch(ids=[vector_id], namespace="")
@@ -200,7 +195,6 @@ def search_text_embeddings(
     match_count: int = 5,
     filter_dict: Optional[Dict] = None
 ) -> List[Dict]:
-    """Search text embeddings in Pinecone"""
     try:
         index = get_pinecone_index()
         
@@ -210,7 +204,6 @@ def search_text_embeddings(
             "include_metadata": True
         }
         
-        # 텍스트 임베딩만 필터링
         if filter_dict:
             query_params["filter"] = filter_dict
         else:
@@ -255,7 +248,6 @@ def upsert_text_embedding(
     rag_text: str,
     metadata: Optional[Dict] = None
 ) -> Optional[str]:
-    """Save text embedding to Pinecone"""
     try:
         index = get_pinecone_index()
         

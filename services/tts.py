@@ -26,7 +26,6 @@ def text_to_speech_bytes(
     speaking_rate: float = 1.0,
     pitch: float = 0.0
 ) -> Optional[bytes]:
-    """Convert text to speech"""
     client = get_tts_client()
     if not client:
         return None
@@ -72,7 +71,6 @@ def text_to_speech(
     language_code: str = "en-US",
     voice_name: Optional[str] = None
 ) -> Optional[str]:
-    """Convert text to speech (returns base64)"""
     audio_bytes = text_to_speech_bytes(text, language_code, voice_name)
     
     if audio_bytes:
@@ -86,7 +84,6 @@ def text_to_speech_url(
     voice_name: Optional[str] = None,
     upload_to_storage: bool = True
 ) -> Tuple[Optional[str], Optional[str]]:
-    """Convert text to speech and upload to storage"""
     audio_bytes = text_to_speech_bytes(text, language_code, voice_name)
     
     if not audio_bytes:

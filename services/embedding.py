@@ -1,4 +1,4 @@
-"""Image Embedding Service - CLIP"""
+"""Image Embedding Service"""
 
 import os
 import logging
@@ -24,7 +24,6 @@ _device = None
 
 
 def load_clip_model() -> Tuple[Optional[object], Optional[object], Optional[str]]:
-    """Load CLIP model"""
     global _clip_model, _clip_processor, _device
     
     if not CLIP_AVAILABLE:
@@ -54,7 +53,6 @@ def load_clip_model() -> Tuple[Optional[object], Optional[object], Optional[str]
 
 
 def generate_image_embedding(image_bytes: bytes) -> Optional[List[float]]:
-    """Generate image embedding"""
     model, processor, device = load_clip_model()
     
     if model is None:
@@ -87,7 +85,6 @@ def generate_embeddings_batch(
     image_bytes_list: List[bytes],
     batch_size: int = 32
 ) -> List[Optional[List[float]]]:
-    """Batch generate embeddings"""
     model, processor, device = load_clip_model()
     
     if model is None:
@@ -143,7 +140,6 @@ def generate_embeddings_batch(
 
 
 def generate_text_embedding(text: str) -> Optional[List[float]]:
-    """Generate text embedding"""
     model, processor, device = load_clip_model()
     
     if model is None:
@@ -151,7 +147,6 @@ def generate_text_embedding(text: str) -> Optional[List[float]]:
         return None
     
     try:
-        # CLIP 모델의 max_position_embeddings는 77이므로 truncation 필요
         inputs = processor(
             text=[text], 
             return_tensors="pt", 
@@ -179,7 +174,6 @@ def calculate_cosine_similarity(
     embedding1: List[float],
     embedding2: List[float]
 ) -> float:
-    """Calculate cosine similarity"""
     try:
         arr1 = np.array(embedding1)
         arr2 = np.array(embedding2)
@@ -202,12 +196,10 @@ def calculate_cosine_similarity(
 
 
 def hash_image(image_bytes: bytes) -> str:
-    """Generate SHA-256 hash of image"""
     return hashlib.sha256(image_bytes).hexdigest()
 
 
 def preload_model():
-    """Preload CLIP model"""
     logger.info("Preloading CLIP model...")
     load_clip_model()
     logger.info("CLIP model preloaded")

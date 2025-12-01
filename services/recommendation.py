@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate distance using Haversine formula (returns km)"""
     R = 6371
     
     lat1_rad = math.radians(lat1)
@@ -28,7 +27,6 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 
 def calculate_category_score(query_category: str, place_category: str) -> float:
-    """Calculate category matching score"""
     if query_category == place_category:
         return 1.0
     
@@ -56,7 +54,6 @@ def recommend_places(
     gps: Optional[Dict[str, float]] = None,
     context: str = "search"
 ) -> Dict:
-    """Recommend places based on image similarity and category"""
     logger.info(f"Recommendation request - category: {category}, context: {context}")
     
     try:
@@ -169,7 +166,6 @@ def recommend_similar_to_place(
     top_k: int = 3,
     threshold: float = 0.7
 ) -> Dict:
-    """Recommend similar places to a given place"""
     logger.info(f"Similar place recommendation for: {place_id}")
     
     try:
@@ -236,4 +232,3 @@ def recommend_similar_to_place(
             "error": str(e),
             "recommendations": []
         }
-

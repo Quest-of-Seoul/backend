@@ -1,4 +1,4 @@
-"""Authentication Service - JWT and Password Hashing"""
+"""Authentication Service"""
 
 import os
 from datetime import datetime, timedelta
@@ -10,30 +10,25 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# JWT settings
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("JWT_SECRET_KEY not found")
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))  # 24 hours default
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against a hash"""
     return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a password"""
     return pwd_context.hash(password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Create a JWT access token"""
     to_encode = data.copy()
     
     if expires_delta:
@@ -47,7 +42,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def decode_access_token(token: str) -> Optional[dict]:
-    """Decode and verify a JWT token"""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
@@ -57,8 +51,7 @@ def decode_access_token(token: str) -> Optional[dict]:
 
 
 def get_user_id_from_token(token: str) -> Optional[str]:
-    """Extract user_id from JWT token"""
     payload = decode_access_token(token)
     if payload:
-        return payload.get("sub")  # 'sub' is the standard JWT claim for subject (user_id)
+        return payload.get("sub")
     return None

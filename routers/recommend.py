@@ -22,7 +22,6 @@ router = APIRouter()
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate distance between two points using Haversine formula (returns km)"""
     R = 6371
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
@@ -42,7 +41,6 @@ def format_quest_response_with_place(
     user_latitude: Optional[float] = None,
     user_longitude: Optional[float] = None
 ) -> dict:
-    """퀘스트 응답 포맷팅 (Place 정보 포함)"""
     result = {
         "id": quest.get("id"),
         "place_id": quest.get("place_id"),
@@ -60,7 +58,6 @@ def format_quest_response_with_place(
         "created_at": quest.get("created_at"),
     }
     
-    # Place 정보 병합
     if place:
         if isinstance(place, list) and len(place) > 0:
             place = place[0]
@@ -75,7 +72,6 @@ def format_quest_response_with_place(
             if place.get("image_url"):
                 result["place_image_url"] = place["image_url"]
     
-    # 거리 계산
     if user_latitude is not None and user_longitude is not None and result.get("latitude") and result.get("longitude"):
         distance_km = haversine_distance(
             user_latitude, user_longitude,
@@ -87,28 +83,22 @@ def format_quest_response_with_place(
 
 
 class RecommendRequest(BaseModel):
-    image: Optional[str] = None  # 단일 이미지 (하위 호환성)
-    images: Optional[List[str]] = None  # 다중 이미지 (1개 또는 3개)
-    latitude: Optional[float] = None  # 현재 위치 (거리 계산용)
-    longitude: Optional[float] = None  # 현재 위치 (거리 계산용)
-    start_latitude: Optional[float] = None  # 출발 위치 (정렬 기준)
-    start_longitude: Optional[float] = None  # 출발 위치 (정렬 기준)
-    radius_km: float = 5.0  # 사용 안 함 (하위 호환성 유지)
-    limit: int = 3  # 상위 3개 추천
+    image: Optional[str] = None
+    images: Optional[List[str]] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    start_latitude: Optional[float] = None
+    start_longitude: Optional[float] = None
+    radius_km: float = 5.0
+    limit: int = 3
     quest_only: bool = True
 
 
 @router.post("/similar-places")
 async def recommend_similar_places(request: RecommendRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    Image-based place recommendation.
-    Results are sorted by distance from start location (or current location if start not provided).
-    Supports 1 or 3 images.
-    """
     try:
         logger.info(f"Recommendation: user={user_id}, GPS=({request.latitude}, {request.longitude})")
         
-        # 이미지 처리: images가 있으면 사용, 없으면 image 사용
         image_list = []
         if request.images:
             if len(request.images) > 3:
@@ -119,7 +109,6 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
         else:
             raise HTTPException(status_code=400, detail="Either 'image' or 'images' must be provided")
         
-        # 이미지 디코딩
         image_bytes_list = []
         for img_str in image_list:
             try:
@@ -128,7 +117,6 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Invalid base64 image: {str(e)}")
         
-        # 다중 이미지 처리: 3개일 경우 평균 임베딩 사용
         from services.embedding import generate_image_embedding
         
         embeddings = []
@@ -140,17 +128,14 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
         if not embeddings:
             raise HTTPException(status_code=400, detail="Failed to generate image embeddings")
         
-        # 다중 이미지의 경우 평균 임베딩 계산
         if len(embeddings) > 1:
             avg_embedding = np.mean(embeddings, axis=0).tolist()
             logger.info(f"Using average embedding from {len(embeddings)} images")
         else:
             avg_embedding = embeddings[0]
         
-        # 임계값 낮춤 (상위 3개 추천이므로)
         match_threshold = 0.2
         
-        # 검색 실행 (GPS 필터링 제거, 이미지 유사도만으로 검색)
         from services.optimized_search import search_with_gps_filter
         results = search_with_gps_filter(
             embedding=avg_embedding,
@@ -160,15 +145,13 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
             start_longitude=request.start_longitude,
             radius_km=request.radius_km,
             match_threshold=match_threshold,
-            match_count=request.limit * 2,  # 더 많이 가져와서 DB 검증 후 필터링
+            match_count=request.limit * 2,
             quest_only=request.quest_only
         )
         
-        # 결과 포맷팅 (Quest 정보 포함) 및 DB 검증
         formatted_recommendations = []
         db = get_db()
         
-        # 실제 DB에 존재하는 place_id만 필터링
         valid_place_ids = set()
         for result in results:
             place = result.get("place", {})
@@ -177,7 +160,6 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
             if not place_id:
                 continue
             
-            # DB에서 실제 존재하는지 확인
             place_check = db.table("places").select("id").eq("id", place_id).eq("is_active", True).limit(1).execute()
             if place_check.data and len(place_check.data) > 0:
                 valid_place_ids.add(place_id)
@@ -186,7 +168,6 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
         
         logger.info(f"Valid places after DB verification: {len(valid_place_ids)}")
         
-        # 유효한 place만 처리
         for result in results:
             place = result.get("place", {})
             place_id = place.get("id")
@@ -194,7 +175,6 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
             if not place_id or place_id not in valid_place_ids:
                 continue
             
-            # 해당 Place에 연결된 Quest 찾기
             quest_result = db.table("quests").select("*").eq("place_id", place_id).eq("is_active", True).limit(1).execute()
 
             logger.info(f"Place {place_id} ({place.get('name')}): Found {len(quest_result.data) if quest_result.data else 0} quests")
@@ -205,7 +185,6 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
                 "place": place
             }
 
-            # Quest 정보 추가
             if quest_result.data and len(quest_result.data) > 0:
                 quest = quest_result.data[0]
                 quest_id = quest.get("id")
@@ -217,13 +196,11 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
                 recommendation_item["longitude"] = float(quest.get("longitude")) if quest.get("longitude") else None
                 recommendation_item["reward_point"] = quest.get("reward_point")
 
-                logger.info(f"✓ Matched: Place '{place.get('name')}' → Quest ID {quest_id} '{quest.get('name')}'")
+                logger.info(f"Matched: Place '{place.get('name')}' → Quest ID {quest_id} '{quest.get('name')}'")
 
-                # 검증: quest의 place_id가 실제로 일치하는지 확인
                 if quest.get("place_id") != place_id:
-                    logger.warning(f"⚠ Mismatch! Quest {quest_id} has place_id={quest.get('place_id')}, but we searched for {place_id}")
+                    logger.warning(f"Mismatch! Quest {quest_id} has place_id={quest.get('place_id')}, but we searched for {place_id}")
                 
-                # 거리 계산 (출발 위치 우선, 없으면 현재 위치 사용)
                 anchor_lat = request.start_latitude if request.start_latitude is not None else request.latitude
                 anchor_lon = request.start_longitude if request.start_longitude is not None else request.longitude
                 
@@ -234,7 +211,6 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
                     )
                     recommendation_item["distance_km"] = round(distance, 2)
             else:
-                # Quest가 없으면 Place 정보만 사용
                 recommendation_item["name"] = place.get("name")
                 recommendation_item["description"] = place.get("description")
                 recommendation_item["category"] = place.get("category")
@@ -242,7 +218,6 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
                 recommendation_item["longitude"] = float(place.get("longitude")) if place.get("longitude") else None
                 recommendation_item["reward_point"] = None
                 
-                # 거리 계산 (출발 위치 우선, 없으면 현재 위치 사용)
                 anchor_lat = request.start_latitude if request.start_latitude is not None else request.latitude
                 anchor_lon = request.start_longitude if request.start_longitude is not None else request.longitude
                 
@@ -253,11 +228,9 @@ async def recommend_similar_places(request: RecommendRequest, user_id: str = Dep
                     )
                     recommendation_item["distance_km"] = round(distance, 2)
             
-            # Place 정보에서 추가 필드
             recommendation_item["district"] = place.get("district")
             recommendation_item["place_image_url"] = place.get("image_url")
 
-            # quest_only가 True인데 quest가 없으면 건너뛰기
             if request.quest_only and not recommendation_item.get("quest_id"):
                 logger.info(f"Skipping {place.get('name')} - no quest found (quest_only=True)")
                 continue
@@ -295,15 +268,12 @@ async def get_nearby_quests_route(
     radius_km: float = 5.0,
     limit: int = 10
 ):
-    """Get nearby quests based on GPS"""
     try:
         logger.info(f"get_nearby_quests_route called with radius_km={radius_km}")
         db = get_db()
         
-        # 퀘스트와 Place 정보를 함께 조회
         quests_result = db.table("quests").select("*, places(*)").eq("is_active", True).execute()
         
-        # 거리 계산 및 필터링
         nearby_quests = []
         for quest_data in quests_result.data:
             quest = dict(quest_data)
@@ -317,7 +287,6 @@ async def get_nearby_quests_route(
                 float(quest["latitude"]), float(quest["longitude"])
             )
             
-            # radius_km 이내의 퀘스트만 포함
             if distance <= radius_km:
                 formatted_quest = format_quest_response_with_place(
                     quest=quest,
@@ -327,10 +296,8 @@ async def get_nearby_quests_route(
                 )
                 nearby_quests.append(formatted_quest)
         
-        # 거리순 정렬
         nearby_quests.sort(key=lambda x: x.get("distance_km", float('inf')))
         
-        # Limit 적용
         nearby_quests = nearby_quests[:limit]
         
         logger.info(f"Found {len(nearby_quests)} nearby quests within {radius_km}km radius")
@@ -351,7 +318,6 @@ async def get_quests_by_category(
     category: str,
     limit: int = 20
 ):
-    """Get quests by category"""
     try:
         places = get_quest_places_by_category(category, limit)
         
@@ -371,7 +337,6 @@ async def get_quests_by_category(
 
 @router.get("/quests/{quest_id}")
 async def get_quest_detail(quest_id: int):
-    """Get quest detail with quizzes"""
     try:
         db = get_db()
         
@@ -385,16 +350,15 @@ async def get_quest_detail(quest_id: int):
         place = db.table("places").select("*").eq("id", quest["place_id"]).single().execute()
         quizzes_result = db.table("quest_quizzes").select("*").eq("quest_id", quest_id).execute()
         
-        # Format quizzes to match frontend expectations
         quizzes = []
         for quiz in quizzes_result.data:
             quiz_obj = {
                 "id": quiz.get("id"),
                 "question": quiz.get("question"),
-                "options": quiz.get("options"),  # Already JSONB array
-                "correct_answer": quiz.get("correct_answer"),  # Already integer (0-3)
+                "options": quiz.get("options"),
+                "correct_answer": quiz.get("correct_answer"),
                 "hint": quiz.get("hint"),
-                "points": 60,  # Default points value expected by frontend
+                "points": 60,
                 "explanation": quiz.get("explanation", "")
             }
             quizzes.append(quiz_obj)
@@ -422,7 +386,6 @@ async def submit_quiz_answer(
     answer: int,
     user_id: str = Depends(get_current_user_id)
 ):
-    """Submit quiz answer"""
     try:
         db = get_db()
         
@@ -433,7 +396,6 @@ async def submit_quiz_answer(
         
         is_correct = quiz.data["correct_answer"] == answer
         
-        # Check if progress record exists
         existing_progress = db.table("user_quest_progress") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -450,7 +412,6 @@ async def submit_quiz_answer(
             progress_data["completed_at"] = datetime.now().isoformat()
         
         if existing_progress.data:
-            # Update existing record
             attempts = (existing_progress.data[0].get("quiz_attempts", 0) or 0) + 1
             progress_data["quiz_attempts"] = attempts
             
@@ -460,7 +421,6 @@ async def submit_quiz_answer(
                 .eq("quest_id", quest_id) \
                 .execute()
         else:
-            # Insert new record
             progress_data["user_id"] = user_id
             progress_data["quest_id"] = quest_id
             progress_data["quiz_attempts"] = 1
@@ -489,21 +449,18 @@ async def submit_quiz_answer(
 
 @router.get("/quests/high-reward")
 async def get_high_reward_quests(
-    latitude: Optional[float] = Query(None, description="사용자 현재 위도 (거리 계산용)"),
-    longitude: Optional[float] = Query(None, description="사용자 현재 경도 (거리 계산용)"),
-    limit: int = Query(3, description="결과 개수"),
-    min_reward_point: int = Query(100, description="최소 포인트")
+    latitude: Optional[float] = Query(None, description="User's current latitude (for distance calculation)"),
+    longitude: Optional[float] = Query(None, description="User's current longitude (for distance calculation)"),
+    limit: int = Query(3, description="Result count"),
+    min_reward_point: int = Query(100, description="Minimum reward point")
 ):
-    """포인트가 높은 퀘스트 추천 (Wanna Get Some Mint? 섹션용)"""
     try:
         db = get_db()
         
-        # 포인트가 높은 퀘스트 조회
         query = db.table("quests").select("*, places(*)").eq("is_active", True).gte("reward_point", min_reward_point).order("reward_point", desc=True).limit(limit * 2)  # 더 많이 조회 후 필터링
         
         quests_result = query.execute()
         
-        # 포맷팅 및 거리 계산
         formatted_quests = []
         for quest_data in quests_result.data:
             quest = dict(quest_data)
@@ -517,10 +474,8 @@ async def get_high_reward_quests(
             )
             formatted_quests.append(formatted_quest)
         
-        # reward_point 내림차순 정렬 (이미 정렬되어 있지만 확실히)
         formatted_quests.sort(key=lambda x: x.get("reward_point", 0), reverse=True)
         
-        # Limit 적용
         formatted_quests = formatted_quests[:limit]
         
         logger.info(f"Found {len(formatted_quests)} high reward quests")
@@ -538,25 +493,21 @@ async def get_high_reward_quests(
 
 @router.get("/quests/newest")
 async def get_newest_quests(
-    latitude: Optional[float] = Query(None, description="사용자 현재 위도 (거리 계산용)"),
-    longitude: Optional[float] = Query(None, description="사용자 현재 경도 (거리 계산용)"),
-    limit: int = Query(3, description="결과 개수"),
-    days: int = Query(30, description="최근 N일 이내")
+    latitude: Optional[float] = Query(None, description="User's current latitude (for distance calculation)"),
+    longitude: Optional[float] = Query(None, description="User's current longitude (for distance calculation)"),
+    limit: int = Query(3, description="Result count"),
+    days: int = Query(30, description="Recent N days")
 ):
-    """최신 퀘스트 추천 (See What's New in Seoul 섹션용)"""
     try:
         db = get_db()
         
-        # 최근 N일 이내 날짜 계산
         cutoff_date = datetime.now() - timedelta(days=days)
         cutoff_date_str = cutoff_date.isoformat()
         
-        # 최신 퀘스트 조회
         query = db.table("quests").select("*, places(*)").eq("is_active", True).gte("created_at", cutoff_date_str).order("created_at", desc=True).limit(limit * 2)  # 더 많이 조회 후 필터링
         
         quests_result = query.execute()
         
-        # 포맷팅 및 거리 계산
         formatted_quests = []
         for quest_data in quests_result.data:
             quest = dict(quest_data)
@@ -570,10 +521,8 @@ async def get_newest_quests(
             )
             formatted_quests.append(formatted_quest)
         
-        # created_at 내림차순 정렬 (이미 정렬되어 있지만 확실히)
         formatted_quests.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         
-        # Limit 적용
         formatted_quests = formatted_quests[:limit]
         
         logger.info(f"Found {len(formatted_quests)} newest quests")
@@ -591,7 +540,6 @@ async def get_newest_quests(
 
 @router.get("/stats")
 async def get_recommendation_stats():
-    """Get recommendation system statistics"""
     try:
         from services.pinecone_store import get_index_stats
         db = get_db()

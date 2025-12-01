@@ -31,7 +31,6 @@ class TTSRequest(BaseModel):
 
 @router.post("/chat")
 async def chat_with_docent(request: DocentRequest, user_id: str = Depends(get_current_user_id)):
-    """AI docent chat with TTS support"""
     try:
         logger.info(f"Docent chat: {request.landmark} (TTS: {request.enable_tts})")
 
@@ -93,7 +92,6 @@ async def chat_with_docent(request: DocentRequest, user_id: str = Depends(get_cu
 
 @router.post("/quiz")
 async def get_quiz(landmark: str, language: str = "en"):
-    """Generate quiz question about landmark"""
     try:
         logger.info(f"Quiz generation: {landmark}")
         quiz = generate_quiz(landmark, "en")
@@ -105,7 +103,6 @@ async def get_quiz(landmark: str, language: str = "en"):
 
 @router.post("/tts")
 async def generate_tts(request: TTSRequest):
-    """Convert text to speech"""
     try:
         logger.info(f"TTS request: {len(request.text)} chars")
 
@@ -150,7 +147,6 @@ async def generate_tts(request: TTSRequest):
 
 @router.get("/history")
 async def get_chat_history(limit: int = 10, user_id: str = Depends(get_current_user_id)):
-    """Get user's chat history"""
     try:
         db = get_db()
         result = db.table("chat_logs") \
@@ -170,7 +166,6 @@ async def get_chat_history(limit: int = 10, user_id: str = Depends(get_current_u
 
 @router.websocket("/ws/tts")
 async def websocket_tts(websocket: WebSocket):
-    """WebSocket endpoint for TTS streaming"""
     await websocket.accept()
     logger.info("WebSocket TTS client connected")
 
@@ -230,7 +225,6 @@ async def websocket_tts(websocket: WebSocket):
 
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    """WebSocket endpoint for AI chat with TTS streaming"""
     await websocket.accept()
     logger.info("WebSocket chat client connected")
 

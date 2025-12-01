@@ -1,4 +1,4 @@
-"""Database Service - Supabase Client"""
+"""Database Service"""
 
 from supabase import create_client, Client
 import os
@@ -46,7 +46,6 @@ DEFAULT_QUEST_POINTS = 300
 
 
 def get_points_for_district(district: Optional[str]) -> int:
-    """자치구 기준 포인트 산정"""
     if not district:
         return DEFAULT_QUEST_POINTS
     normalized = district.strip()
@@ -71,9 +70,6 @@ def get_db() -> Client:
 
 
 def ensure_user_exists(user_id: str, email: Optional[str] = None, nickname: str = "Guest User") -> None:
-    """
-    Ensure that a user row exists so that FK constrained tables (points, chat_logs, etc.) can insert safely.
-    """
     try:
         db = get_db()
         existing = db.table("users").select("id").eq("id", user_id).limit(1).execute()
@@ -95,7 +91,6 @@ def search_places_by_radius(
     radius_km: float = 1.0,
     limit_count: int = 10
 ) -> List[Dict]:
-    """Search places within GPS radius"""
     try:
         db = get_db()
         
@@ -122,7 +117,6 @@ def search_places_by_radius(
 
 
 def get_place_by_id(place_id: str) -> Optional[Dict]:
-    """Get place by ID"""
     try:
         db = get_db()
         result = db.table("places").select("*").eq("id", place_id).single().execute()
@@ -139,7 +133,6 @@ def get_place_by_id(place_id: str) -> Optional[Dict]:
 
 
 def get_place_by_name(name: str, fuzzy: bool = True) -> Optional[Dict]:
-    """Search place by name with optional fuzzy matching"""
     try:
         db = get_db()
         
@@ -174,7 +167,6 @@ def save_vlm_log(
     image_hash: Optional[str] = None,
     error_message: Optional[str] = None
 ) -> Optional[str]:
-    """Save VLM analysis log"""
     try:
         db = get_db()
         
@@ -225,7 +217,6 @@ def save_vlm_log(
 
 
 def get_cached_vlm_result(image_hash: str, max_age_hours: int = 24) -> Optional[Dict]:
-    """Get cached VLM result by image hash"""
     try:
         db = get_db()
         from datetime import datetime, timedelta
@@ -251,7 +242,6 @@ def get_cached_vlm_result(image_hash: str, max_age_hours: int = 24) -> Optional[
 
 
 def increment_place_view_count(place_id: str) -> bool:
-    """Increment place view count"""
     try:
         db = get_db()
         place = get_place_by_id(place_id)
@@ -270,19 +260,9 @@ def increment_place_view_count(place_id: str) -> bool:
 
 
 def save_place(place_data: Dict) -> Optional[str]:
-    """
-    장소 데이터를 DB에 저장
-    
-    Args:
-        place_data: 저장할 장소 데이터 딕셔너리
-    
-    Returns:
-        저장된 place_id 또는 None
-    """
     try:
         db = get_db()
         
-        # 필수 필드 검증
         if not place_data.get("name"):
             logger.error("Place name is required")
             return None
@@ -291,8 +271,6 @@ def save_place(place_data: Dict) -> Optional[str]:
             logger.error("Place coordinates are required")
             return None
         
-        # 중복 체크 (이름으로만 - UNIQUE 제약이 name에 있음)
-        # 이름이 같으면 같은 장소로 간주하고 업데이트
         existing = db.table("places") \
             .select("id") \
             .ilike("name", place_data["name"]) \
@@ -303,11 +281,9 @@ def save_place(place_data: Dict) -> Optional[str]:
             place_id = existing.data[0]["id"]
             logger.info(f"Place already exists: {place_id} ({place_data['name']})")
             
-            # 업데이트
             db.table("places").update(place_data).eq("id", place_id).execute()
             return place_id
         
-        # 새로 생성
         result = db.table("places").insert(place_data).execute()
         
         if result.data and len(result.data) > 0:
@@ -323,26 +299,14 @@ def save_place(place_data: Dict) -> Optional[str]:
 
 
 def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) -> Optional[int]:
-    """
-    장소로부터 퀘스트 생성
-    
-    Args:
-        place_id: 장소 ID
-        quest_data: 추가 퀘스트 데이터 (선택)
-    
-    Returns:
-        생성된 quest_id 또는 None
-    """
     try:
         db = get_db()
         
-        # 장소 정보 가져오기
         place = get_place_by_id(place_id)
         if not place:
             logger.error(f"Place not found: {place_id}")
             return None
         
-        # 퀘스트 데이터 준비
         quest_points = get_points_for_district(place.get("district"))
         logger.info(
             "Calculated quest points for place %s (district: %s): %d",
@@ -351,7 +315,6 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
             quest_points
         )
         
-        # 문자열 길이 제한 검증 (스키마 제약 조건)
         quest_name = place.get("name") or ""
         if len(quest_name) > 255:
             logger.warning(f"Quest name exceeds 255 characters, truncating: {quest_name[:50]}...")
@@ -365,7 +328,7 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
         quest_insert = {
             "place_id": place_id,
             "name": quest_name,
-            "title": quest_name,  # title도 255자 제한
+            "title": quest_name,
             "description": place.get("description"),
             "category": quest_category,
             "latitude": float(place.get("latitude")),
@@ -376,11 +339,9 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
             "is_active": True
         }
         
-        # 추가 데이터 병합
         if quest_data:
             quest_insert.update(quest_data)
         
-        # 중복 체크
         existing = db.table("quests") \
             .select("id") \
             .eq("place_id", place_id) \
@@ -392,7 +353,6 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
             logger.info(f"Quest already exists for place: {place_id} (quest_id: {quest_id})")
             return quest_id
         
-        # 새로 생성
         result = db.table("quests").insert(quest_insert).execute()
         
         if result.data and len(result.data) > 0:
@@ -408,16 +368,6 @@ def create_quest_from_place(place_id: str, quest_data: Optional[Dict] = None) ->
 
 
 def save_quest_quizzes(quest_id: int, quizzes: List[Dict]) -> List[int]:
-    """
-    퀘스트에 퀴즈들을 저장
-    
-    Args:
-        quest_id: 퀘스트 ID
-        quizzes: 퀴즈 리스트 (각 퀴즈는 question, options, correct_answer, hint, explanation, difficulty 포함)
-    
-    Returns:
-        생성된 퀴즈 ID 리스트
-    """
     try:
         db = get_db()
         quiz_ids = []

@@ -1,4 +1,4 @@
-"""Quest of Seoul - FastAPI Backend"""
+"""Quest of Seoul"""
 
 from dotenv import load_dotenv
 import os

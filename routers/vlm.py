@@ -49,7 +49,6 @@ class SimilarImageRequest(BaseModel):
 
 @router.post("/analyze")
 async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_current_user_id)):
-    """AR camera image analysis with VLM and vector search"""
     start_time = time.time()
     
     try:
@@ -86,7 +85,6 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
             )
             logger.info(f"Found {len(nearby_places)} nearby places")
         
-        # Multi-modal search: image embedding + GPS + text matching
         embedding = generate_image_embedding(image_bytes)
         if not embedding:
             logger.warning("Embedding generation failed")
@@ -98,14 +96,13 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
         if embedding:
             from services.optimized_search import search_with_gps_filter
             
-            # Image vector search
             similar_images = search_with_gps_filter(
                 embedding=embedding,
                 latitude=request.latitude,
                 longitude=request.longitude,
                 radius_km=5.0,
                 match_threshold=0.6,
-                match_count=5,  # Collect more candidates
+                match_count=5,
                 quest_only=False
             )
             
@@ -114,23 +111,18 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
                 matched_place_from_vector = similar_images[0].get("place")
                 logger.info(f"Found {len(similar_images)} similar images (best: {best_similarity:.2f})")
         
-        # VLM analysis (with multi-modal information)
-        # Prioritize vector search results in nearby_places
         enhanced_nearby_places = []
         
-        # Add places found by vector search with priority
         if matched_place_from_vector:
             enhanced_nearby_places.append({
                 "id": matched_place_from_vector.get("id"),
                 "name": matched_place_from_vector.get("name"),
                 "category": matched_place_from_vector.get("category"),
-                "distance_km": 0.0,  # Vector matching has no distance info
+                "distance_km": 0.0,
                 "source": "vector_search"
             })
         
-        # Add GPS-based nearby places
         for np in nearby_places:
-            # Remove duplicates
             if not any(ep.get("id") == np.get("id") for ep in enhanced_nearby_places):
                 enhanced_nearby_places.append(np)
         
@@ -138,7 +130,7 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
             image_bytes=image_bytes,
             nearby_places=enhanced_nearby_places,
             language="en",
-            quest_context=None  # No quest context for general VLM analysis
+            quest_context=None
         )
         
         if not vlm_response:
@@ -152,28 +144,23 @@ async def analyze_image(request: VLMAnalyzeRequest, user_id: str = Depends(get_c
         matched_place = None
         matched_place_id = None
         
-        # Multi-modal matching: VLM + vector search + GPS integration
-        # Priority 1: Vector search results (high image similarity)
         if matched_place_from_vector:
             matched_place = matched_place_from_vector
             matched_place_id = matched_place.get("id")
             logger.info(f"Matched place from vector search: {matched_place.get('name')}")
         
-        # Priority 2: Search by place name extracted by VLM
         elif place_info.get("place_name"):
             matched_place = get_place_by_name(place_info["place_name"], fuzzy=True)
             if matched_place:
                 matched_place_id = matched_place.get("id")
                 logger.info(f"Matched place from VLM: {matched_place.get('name')}")
         
-        # Priority 3: Vector search results (if VLM matching failed)
         if not matched_place and similar_images:
             matched_place = similar_images[0].get("place")
             if matched_place:
                 matched_place_id = matched_place.get("id")
                 logger.info(f"Matched place from vector fallback: {matched_place.get('name')}")
         
-        # Priority 4: First GPS-based nearby place (if matching failed)
         if not matched_place and nearby_places:
             matched_place = nearby_places[0]
             matched_place_id = matched_place.get("id")
@@ -309,7 +296,6 @@ async def analyze_image_multipart(
     enable_tts: bool = Form(True),
     user_id: str = Depends(get_current_user_id)
 ):
-    """AR camera image analysis (multipart/form-data)"""
     try:
         image_bytes = await image.read()
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
@@ -332,7 +318,6 @@ async def analyze_image_multipart(
 
 @router.post("/similar")
 async def search_similar(request: SimilarImageRequest):
-    """Similar image search using vector similarity"""
     try:
         logger.info(f"Similar image search (limit: {request.limit})")
         
@@ -366,7 +351,6 @@ async def create_embedding(
     place_id: str = Form(...),
     image: UploadFile = File(...)
 ):
-    """Create and save image embedding (admin only)"""
     try:
         import uuid
         
@@ -428,7 +412,6 @@ async def get_nearby_places(
     radius_km: float = 1.0,
     limit: int = 10
 ):
-    """Get nearby places based on GPS"""
     try:
         places = search_places_by_radius(
             latitude=latitude,
@@ -452,7 +435,6 @@ async def get_nearby_places(
 
 @router.get("/health")
 async def health_check():
-    """VLM service health check"""
     from services.vlm import OPENAI_AVAILABLE
     from services.embedding import CLIP_AVAILABLE
     
@@ -474,4 +456,3 @@ async def health_check():
         },
         "pinecone_stats": pinecone_stats if pinecone_available else None
     }
-

@@ -15,7 +15,6 @@ router = APIRouter()
 
 
 def get_quest_with_place(db, quest_id: int) -> Dict[str, Any]:
-    """Fetch quest and related place info."""
     quest_result = db.table("quests").select("*, places(*)").eq("id", quest_id).single().execute()
     if not quest_result.data:
         raise HTTPException(status_code=404, detail="Quest not found")
@@ -37,25 +36,24 @@ class QuestProgressRequest(BaseModel):
 
 class QuestStartRequest(BaseModel):
     quest_id: int
-    latitude: Optional[float] = None  # 사용자 현재 위치 (위도)
-    longitude: Optional[float] = None  # 사용자 현재 위치 (경도)
-    start_latitude: Optional[float] = None  # 출발 위치 (위도)
-    start_longitude: Optional[float] = None  # 출발 위치 (경도)
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    start_latitude: Optional[float] = None
+    start_longitude: Optional[float] = None
 
 
 class QuestQuizAnswerRequest(BaseModel):
     answer: int
-    is_last_quiz: bool = False  # Indicates if this is the last quiz in the quest
+    is_last_quiz: bool = False
 
 
 class NearbyQuestRequest(BaseModel):
     lat: float
     lon: float
-    radius_km: float = 1.0  # Default 1km radius
+    radius_km: float = 1.0
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate distance between two points using Haversine formula (returns km)"""
     R = 6371
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
@@ -71,20 +69,15 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 @router.get("/list")
 async def get_all_quests():
-    """Get all available quests with place information"""
     try:
         db = get_db()
-        # Join with places table to get category and other place info
         result = db.table("quests").select("*, places(category, district, name, address, image_url, images)").execute()
 
-        # Post-process to merge place data into quest data
         quests = []
         for quest in result.data:
             quest_data = dict(quest)
             place = quest.get("places")
             
-            # Handle different Supabase JOIN response formats
-            # Could be: None, empty dict {}, dict with data, or array
             if place:
                 if isinstance(place, list) and len(place) > 0:
                     place = place[0]  # Take first place if array
@@ -93,23 +86,18 @@ async def get_all_quests():
                 else:
                     place = None
             
-            # If place exists, merge place data into quest
             if place and isinstance(place, dict):
-                # Merge place category and district if quest doesn't have them
                 if not quest_data.get("category") and place.get("category"):
                     quest_data["category"] = place["category"]
                 if not quest_data.get("district") and place.get("district"):
                     quest_data["district"] = place["district"]
-                # Add place address if available
                 if place.get("address"):
                     quest_data["address"] = place["address"]
-                # Add place image info if available
                 if place.get("image_url"):
                     quest_data["place_image_url"] = place["image_url"]
                 if place.get("images"):
                     quest_data["place_images"] = place["images"]
             
-            # Remove the nested places object
             quest_data.pop("places", None)
             quests.append(quest_data)
 
@@ -123,15 +111,10 @@ async def get_all_quests():
 
 @router.post("/nearby")
 async def get_nearby_quests(request: NearbyQuestRequest):
-    """
-    Get quests near user's current location
-    """
     try:
         db = get_db()
-        # Join with places table to get category and other place info
         all_quests = db.table("quests").select("*, places(category, district, name, image_url, images)").execute()
 
-        # Filter quests within radius
         nearby = []
         for quest in all_quests.data:
             distance = haversine_distance(
@@ -139,17 +122,14 @@ async def get_nearby_quests(request: NearbyQuestRequest):
                 quest['latitude'], quest['longitude']
             )
             if distance <= request.radius_km:
-                # Add distance and rename fields for nearby endpoint
                 quest_obj = dict(quest)
                 
-                # Merge place data if available
                 place = quest_obj.get("places")
-                # Handle different Supabase JOIN response formats
                 if place:
                     if isinstance(place, list) and len(place) > 0:
-                        place = place[0]  # Take first place if array
+                        place = place[0]
                     elif isinstance(place, dict) and len(place) > 0:
-                        pass  # Already a dict
+                        pass
                     else:
                         place = None
                 
@@ -164,12 +144,11 @@ async def get_nearby_quests(request: NearbyQuestRequest):
                         quest_obj["place_images"] = place["images"]
                 
                 quest_obj.pop("places", None)
-                quest_obj['quest_id'] = quest['id']  # Frontend expects quest_id for nearby
-                quest_obj['title'] = quest['name']   # Frontend expects title for nearby
+                quest_obj['quest_id'] = quest['id']
+                quest_obj['title'] = quest['name']
                 quest_obj['distance_km'] = round(distance, 2)
                 nearby.append(quest_obj)
 
-        # Sort by distance
         nearby.sort(key=lambda x: x['distance_km'])
 
         return {
@@ -183,9 +162,6 @@ async def get_nearby_quests(request: NearbyQuestRequest):
 
 @router.post("/start")
 async def start_quest(request: QuestStartRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    Start or resume a quest for a user. Returns quest/place metadata for downstream quiz/chat usage.
-    """
     try:
         db = get_db()
         quest = get_quest_with_place(db, request.quest_id)
@@ -212,8 +188,6 @@ async def start_quest(request: QuestStartRequest, user_id: str = Depends(get_cur
             }
             status = "in_progress"
 
-        # Mirror progress row for quiz tracking
-        # 이미 존재하는지 확인 후 upsert
         existing_progress = db.table("user_quest_progress") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -221,21 +195,18 @@ async def start_quest(request: QuestStartRequest, user_id: str = Depends(get_cur
             .execute()
         
         if existing_progress.data:
-            # 이미 존재하면 업데이트
             db.table("user_quest_progress") \
                 .update({"status": status}) \
                 .eq("user_id", user_id) \
                 .eq("quest_id", request.quest_id) \
                 .execute()
         else:
-            # 없으면 삽입
             db.table("user_quest_progress").insert({
                 "user_id": user_id,
                 "quest_id": request.quest_id,
                 "status": status
             }).execute()
 
-        # 위치 정보 수집 (1km 이내일 때만)
         if request.latitude and request.longitude:
             from services.location_tracking import log_location_data
             log_location_data(
@@ -269,18 +240,13 @@ async def start_quest(request: QuestStartRequest, user_id: str = Depends(get_cur
 
 @router.post("/progress")
 async def update_quest_progress(request: QuestProgressRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    Update user's quest progress
-    """
     try:
         db = get_db()
 
-        # Check if quest exists
         quest = db.table("quests").select("*").eq("id", request.quest_id).execute()
         if not quest.data:
             raise HTTPException(status_code=404, detail="Quest not found")
 
-        # Check if user_quest record exists
         existing = db.table("user_quests") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -288,7 +254,6 @@ async def update_quest_progress(request: QuestProgressRequest, user_id: str = De
             .execute()
 
         if existing.data:
-            # Update existing record
             update_data = {"status": request.status}
             if request.status == "completed":
                 update_data["completed_at"] = datetime.now().isoformat()
@@ -299,7 +264,6 @@ async def update_quest_progress(request: QuestProgressRequest, user_id: str = De
                 .eq("quest_id", request.quest_id) \
                 .execute()
         else:
-            # Create new record
             insert_data = {
                 "user_id": user_id,
                 "quest_id": request.quest_id,
@@ -310,7 +274,6 @@ async def update_quest_progress(request: QuestProgressRequest, user_id: str = De
 
             db.table("user_quests").insert(insert_data).execute()
 
-        # If completed, award points (only once per quest)
         if request.status == "completed":
             already_completed = existing.data and existing.data[0].get("status") == "completed"
             if already_completed:
@@ -344,9 +307,6 @@ async def update_quest_progress(request: QuestProgressRequest, user_id: str = De
 
 @router.get("/user")
 async def get_user_quests(status: Optional[str] = None, user_id: str = Depends(get_current_user_id)):
-    """
-    Get user's quests, optionally filtered by status
-    """
     try:
         db = get_db()
 
@@ -369,14 +329,10 @@ async def get_user_quests(status: Optional[str] = None, user_id: str = Depends(g
 
 @router.get("/{quest_id}")
 async def get_quest_detail(quest_id: int, user_id: Optional[str] = Depends(get_current_user_id_optional)):
-    """
-    Get detailed information about a specific quest
-    """
     try:
         db = get_db()
         quest = get_quest_with_place(db, quest_id)
 
-        # place_id가 있으면 이미지 정보는 이미 포함되어 있음(get_quest_with_place)
         response = {"quest": quest}
 
         if user_id:
@@ -402,10 +358,6 @@ async def get_quest_detail(quest_id: int, user_id: Optional[str] = Depends(get_c
 
 @router.get("/{quest_id}/quizzes")
 async def get_quest_quizzes(quest_id: int):
-    """
-    Retrieve quizzes tied to a quest/place so that the frontend can start testing immediately after quest start.
-    If no quizzes exist, generate them using AI and save to database.
-    """
     try:
         db = get_db()
         quest = get_quest_with_place(db, quest_id)
@@ -427,7 +379,6 @@ async def get_quest_quizzes(quest_id: int):
                 "difficulty": quiz.get("difficulty", "easy")
             })
 
-        # If no quizzes exist, generate them using AI
         if len(quizzes) == 0:
             logger.info(f"No quizzes found for quest {quest_id}, generating with AI...")
             
@@ -436,20 +387,17 @@ async def get_quest_quizzes(quest_id: int):
             place_description = quest.get("description") or place.get("description")
             place_category = quest.get("category") or place.get("category")
             
-            # Generate quizzes using AI
             generated_quizzes = generate_quest_quizzes(
                 place_name=place_name,
                 place_description=place_description,
                 place_category=place_category,
-                language="ko",
+                language="en",
                 count=5
             )
             
             if generated_quizzes:
-                # Save generated quizzes to database
                 quiz_ids = save_quest_quizzes(quest_id, generated_quizzes)
                 
-                # Fetch saved quizzes to return with IDs
                 if quiz_ids:
                     saved_quizzes_result = db.table("quest_quizzes") \
                         .select("*") \
@@ -489,19 +437,10 @@ async def get_quest_quizzes(quest_id: int):
 
 @router.post("/{quest_id}/quizzes/{quiz_id}/submit")
 async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswerRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    Submit quiz answer with scoring system:
-    - First attempt correct: 20 points
-    - First attempt wrong: 0 points, retry with hint allowed
-    - Second attempt (after hint) correct: 10 points
-    - Second attempt wrong: 0 points
-    - Quest completes when total score reaches 100 points
-    """
     try:
         db = get_db()
         ensure_user_exists(user_id)
 
-        # Get quiz data
         quiz_result = db.table("quest_quizzes") \
             .select("*") \
             .eq("id", quiz_id) \
@@ -515,7 +454,6 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
         quiz = quiz_result.data
         is_correct = quiz["correct_answer"] == request.answer
 
-        # Get current progress
         progress_result = db.table("user_quest_progress") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -523,7 +461,6 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
             .limit(1) \
             .execute()
 
-        # Initialize or get current state
         current_score = 0
         quiz_attempts = 0
         correct_count = 0
@@ -536,29 +473,23 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
             correct_count = progress.get("correct_count", 0) or 0
             used_hint = progress.get("used_hint", False) or False
 
-        # Calculate earned points for this attempt
         earned = 0
         retry_allowed = False
         
         if is_correct:
             if quiz_attempts == 0:
-                # First attempt correct
                 earned = 20
             else:
-                # Second attempt (after hint) correct
                 earned = 10
             correct_count += 1
         else:
             if quiz_attempts == 0:
-                # First attempt wrong - allow retry with hint
                 retry_allowed = True
                 used_hint = True
-            # Second attempt wrong - no points
 
         quiz_attempts += 1
         new_score = current_score + earned
 
-        # Update progress data
         update_data = {
             "quiz_attempts": quiz_attempts,
             "quiz_correct": is_correct,
@@ -567,7 +498,6 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
             "used_hint": used_hint,
         }
 
-        # Quest completes when all quizzes are answered (indicated by is_last_quiz flag)
         quest_completed = request.is_last_quiz
         
         if quest_completed:
@@ -576,7 +506,6 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
         else:
             update_data["status"] = "in_progress"
 
-        # Update or insert progress
         if progress_result.data:
             db.table("user_quest_progress") \
                 .update(update_data) \
@@ -588,7 +517,6 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
             update_data["quest_id"] = quest_id
             db.table("user_quest_progress").insert(update_data).execute()
 
-        # Award quest reward points if completed
         points_awarded = 0
         new_balance = None
         already_completed = False
@@ -597,7 +525,6 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
             quest_result = db.table("quests").select("reward_point, name").eq("id", quest_id).single().execute()
             quest_data = quest_result.data
 
-            # Check if already completed (정보로만 사용, 보상 지급은 항상 수행)
             user_quest = db.table("user_quests") \
                 .select("status") \
                 .eq("user_id", user_id) \
@@ -607,7 +534,6 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
             
             already_completed = bool(user_quest.data and user_quest.data[0].get("status") == "completed")
 
-            # 항상 완료 상태로 갱신 (여러 번 푼 경우에도 최신 completed_at 유지)
             timestamp = datetime.now().isoformat()
             if user_quest.data:
                 db.table("user_quests").update({
@@ -623,13 +549,12 @@ async def submit_quest_quiz(quest_id: int, quiz_id: int, request: QuestQuizAnswe
                     "completed_at": timestamp
                 }).execute()
 
-            # 🔥 매번 퀴즈를 완주할 때마다 실제 퀴즈 점수(new_score)만큼 포인트 지급
             points_awarded = new_score
             if points_awarded > 0:
                 db.table("points").insert({
                     "user_id": user_id,
                     "value": points_awarded,
-                    "reason": f"퀘스트 완료: {quest_data.get('name', '')} ({points_awarded}점)"
+                    "reason": f"Quest completed: {quest_data.get('name', '')} ({points_awarded} points)"
                 }).execute()
 
             balance_result = db.rpc("get_user_points", {"user_uuid": user_id}).execute()

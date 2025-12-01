@@ -1,4 +1,4 @@
-"""Authentication Router - Login, Signup, Token Refresh"""
+"""Authentication Router"""
 
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -40,15 +40,9 @@ class TokenResponse(BaseModel):
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def signup(request: SignupRequest):
-    """
-    회원가입
-    - 이메일과 비밀번호로 새 사용자 생성
-    - 성공 시 JWT 토큰 반환
-    """
     try:
         db = get_db()
         
-        # 이메일 중복 확인
         existing = db.table("users").select("id, email").eq("email", request.email).execute()
         if existing.data:
             raise HTTPException(
@@ -56,10 +50,8 @@ async def signup(request: SignupRequest):
                 detail="Email already registered"
             )
         
-        # 비밀번호 해싱
         password_hash = get_password_hash(request.password)
         
-        # 사용자 생성
         user_data = {
             "email": request.email,
             "password_hash": password_hash,
@@ -77,7 +69,6 @@ async def signup(request: SignupRequest):
         user = result.data[0]
         user_id = user["id"]
         
-        # JWT 토큰 생성
         access_token = create_access_token(data={"sub": user_id})
         
         logger.info(f"User signed up: {request.email} (id: {user_id})")
@@ -101,15 +92,9 @@ async def signup(request: SignupRequest):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(request: LoginRequest):
-    """
-    로그인
-    - 이메일과 비밀번호로 인증
-    - 성공 시 JWT 토큰 반환
-    """
     try:
         db = get_db()
         
-        # 사용자 조회
         result = db.table("users").select("id, email, password_hash, nickname").eq("email", request.email).execute()
         
         if not result.data or len(result.data) == 0:
@@ -120,7 +105,6 @@ async def login(request: LoginRequest):
         
         user = result.data[0]
         
-        # 비밀번호 확인
         if not user.get("password_hash"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -135,7 +119,6 @@ async def login(request: LoginRequest):
         
         user_id = user["id"]
         
-        # JWT 토큰 생성
         access_token = create_access_token(data={"sub": user_id})
         
         logger.info(f"User logged in: {request.email} (id: {user_id})")
@@ -159,10 +142,6 @@ async def login(request: LoginRequest):
 
 @router.get("/me")
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """
-    현재 로그인한 사용자 정보 조회
-    - Authorization 헤더의 Bearer 토큰에서 사용자 정보 추출
-    """
     try:
         token = credentials.credentials
         payload = decode_access_token(token)
@@ -180,7 +159,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 detail="Invalid token"
             )
         
-        # 사용자 정보 조회
         db = get_db()
         result = db.table("users").select("id, email, nickname, joined_at").eq("id", user_id).execute()
         
@@ -211,10 +189,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 @router.post("/refresh")
 async def refresh_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """
-    토큰 갱신
-    - 기존 토큰을 검증하고 새 토큰 발급
-    """
     try:
         token = credentials.credentials
         payload = decode_access_token(token)
@@ -232,7 +206,6 @@ async def refresh_token(credentials: HTTPAuthorizationCredentials = Depends(secu
                 detail="Invalid token"
             )
         
-        # 사용자 존재 확인
         db = get_db()
         result = db.table("users").select("id, email, nickname").eq("id", user_id).execute()
         
@@ -244,7 +217,6 @@ async def refresh_token(credentials: HTTPAuthorizationCredentials = Depends(secu
         
         user = result.data[0]
         
-        # 새 토큰 생성
         new_token = create_access_token(data={"sub": user_id})
         
         return TokenResponse(

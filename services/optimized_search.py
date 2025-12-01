@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate distance between two points using Haversine formula (returns km)"""
     R = 6371
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
@@ -31,31 +30,24 @@ def search_with_gps_filter(
     longitude: Optional[float] = None,
     start_latitude: Optional[float] = None,
     start_longitude: Optional[float] = None,
-    radius_km: float = 5.0,  # 사용 안 함 (하위 호환성 유지)
-    match_threshold: float = 0.2,  # 임계값 낮춤 (상위 3개 추천이므로)
+    radius_km: float = 5.0,
+    match_threshold: float = 0.2,
     match_count: int = 5,
     quest_only: bool = False
 ) -> List[Dict]:
-    """
-    Image similarity search without GPS filtering.
-    Results are sorted by distance from start location (or current location if start not provided).
-    """
     try:
-        # 출발 위치가 있으면 사용, 없으면 현재 위치 사용
         anchor_lat = start_latitude if start_latitude is not None else latitude
         anchor_lon = start_longitude if start_longitude is not None else longitude
         
         logger.info(f"Image similarity search: quest_only={quest_only}, anchor=({anchor_lat}, {anchor_lon})")
 
-        # 이미지 유사도만으로 검색 (GPS 필터링 제거)
         results = search_similar_pinecone(
             embedding=embedding,
             match_threshold=match_threshold,
-            match_count=match_count * 3  # 더 많이 가져와서 필터링 후 정렬
+            match_count=match_count * 3
         )
         logger.info(f"Pinecone returned {len(results)} results")
 
-        # quest_only 필터링
         if quest_only:
             db = get_db()
             all_quest_result = db.table("quests") \
@@ -70,7 +62,6 @@ def search_with_gps_filter(
             ]
             logger.info(f"Filtered to {len(results)} quest places")
 
-        # 출발 위치(또는 현재 위치) 기준으로 거리 계산 및 정렬
         if anchor_lat is not None and anchor_lon is not None:
             for result in results:
                 place = result.get('place', {})
@@ -81,13 +72,11 @@ def search_with_gps_filter(
                     )
                     result['distance_from_anchor'] = distance
             
-            # 거리순 정렬
             results.sort(key=lambda x: x.get('distance_from_anchor', float('inf')))
             logger.info(f"Sorted {len(results)} results by distance from anchor")
         else:
             logger.info("No anchor location provided, using similarity order")
 
-        # 최종 결과 반환
         final_results = results[:match_count]
         logger.info(f"Final results: {len(final_results)}")
         
@@ -104,12 +93,11 @@ def search_similar_with_optimization(
     longitude: Optional[float] = None,
     start_latitude: Optional[float] = None,
     start_longitude: Optional[float] = None,
-    radius_km: float = 5.0,  # 사용 안 함 (하위 호환성 유지)
-    match_threshold: float = 0.2,  # 임계값 낮춤 (상위 3개 추천이므로)
+    radius_km: float = 5.0,
+    match_threshold: float = 0.2,
     match_count: int = 5,
     quest_only: bool = False
 ) -> List[Dict]:
-    """Image similarity search with optimization"""
     embedding = generate_image_embedding(image_bytes)
     
     if not embedding:
@@ -130,7 +118,6 @@ def search_similar_with_optimization(
 
 
 def get_quest_places_by_category(category: str, limit: int = 20) -> List[Dict]:
-    """Get quest places by category"""
     try:
         db = get_db()
         
@@ -155,7 +142,6 @@ def search_nearby_quests(
     radius_km: float = 5.0,
     limit: int = 10
 ) -> List[Dict]:
-    """Search nearby quests"""
     try:
         db = get_db()
         

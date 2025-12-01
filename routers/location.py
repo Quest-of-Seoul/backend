@@ -17,8 +17,8 @@ class LocationTrackRequest(BaseModel):
     """주기적 위치 추적 요청"""
     latitude: float
     longitude: float
-    quest_id: Optional[int] = None  # 현재 진행 중인 퀘스트 ID (선택)
-    place_id: Optional[str] = None  # 현재 위치한 장소 ID (선택)
+    quest_id: Optional[int] = None
+    place_id: Optional[str] = None
 
 
 @router.post("/track")
@@ -26,21 +26,15 @@ async def track_location(
     request: LocationTrackRequest,
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    주기적인 위치 추적 (시간별 이동 경로 추적)
-    """
     try:
-        # 입력 검증
         if request.latitude is None or request.longitude is None:
             raise HTTPException(status_code=400, detail="latitude and longitude are required")
         
-        # 위도/경도 범위 검증
         if not (-90 <= request.latitude <= 90):
             raise HTTPException(status_code=400, detail="latitude must be between -90 and 90")
         if not (-180 <= request.longitude <= 180):
             raise HTTPException(status_code=400, detail="longitude must be between -180 and 180")
         
-        # 위치 추적 로그 저장
         success = log_periodic_location(
             user_id=user_id,
             user_latitude=request.latitude,
@@ -67,18 +61,12 @@ async def track_location(
 
 @router.get("/track/history")
 async def get_location_history(
-    start_date: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
-    limit: int = Query(1000, description="최대 조회 개수 (기본: 1000)"),
+    start_date: Optional[str] = Query(None, description="Start Date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End Date (YYYY-MM-DD)"),
+    limit: int = Query(1000, description="Maximum number of locations to retrieve (default: 1000)"),
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    사용자의 이동 경로 조회 (시간순)
-    
-    주기적으로 수집된 위치 정보를 시간순으로 조회합니다.
-    """
     try:
-        # 날짜 형식 검증
         if start_date:
             try:
                 datetime.fromisoformat(start_date)
@@ -91,7 +79,6 @@ async def get_location_history(
             except ValueError:
                 raise HTTPException(status_code=400, detail="end_date must be in YYYY-MM-DD format")
         
-        # 이동 경로 조회
         locations = get_user_location_history(
             user_id=user_id,
             start_date=start_date,
@@ -99,7 +86,6 @@ async def get_location_history(
             limit=limit
         )
         
-        # 응답 포맷팅
         formatted_locations = []
         for loc in locations:
             formatted_locations.append({

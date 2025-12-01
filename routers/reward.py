@@ -23,7 +23,6 @@ class AddPointsRequest(BaseModel):
 
 @router.get("/points")
 async def get_user_points(user_id: str = Depends(get_current_user_id)):
-    """Get user's total points balance"""
     try:
         logger.info(f"Getting points for user: {user_id}")
 
@@ -53,7 +52,6 @@ async def get_user_points(user_id: str = Depends(get_current_user_id)):
 
 @router.post("/points/add")
 async def add_points(request: AddPointsRequest, user_id: str = Depends(get_current_user_id)):
-    """Add points to user's account"""
     try:
         logger.info(f"Adding {request.points} points to user: {user_id}")
 
@@ -95,13 +93,6 @@ async def get_available_rewards(
     type: str | None = None,
     search: str | None = None
 ):
-    """
-    Get available rewards with optional category filtering and search.
-    
-    Args:
-        type: Filter by reward type (food, cafe, shopping, ticket, activity, entertainment, beauty, wellness)
-        search: Search by reward name
-    """
     try:
         db = get_db()
         query = db.table("rewards").select("*").eq("is_active", True)
@@ -127,13 +118,9 @@ async def get_available_rewards(
 
 @router.post("/claim")
 async def claim_reward(request: ClaimRewardRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    Claim a reward using points
-    """
     try:
         db = get_db()
 
-        # Get reward details
         reward = db.table("rewards") \
             .select("*") \
             .eq("id", request.reward_id) \
@@ -145,11 +132,9 @@ async def claim_reward(request: ClaimRewardRequest, user_id: str = Depends(get_c
 
         reward_data = reward.data[0]
 
-        # Get user's total points
         user_points_result = db.rpc("get_user_points", {"user_uuid": user_id}).execute()
         user_points = user_points_result.data if user_points_result.data else 0
 
-        # Check if user has enough points
         if user_points < reward_data['point_cost']:
             return {
                 "status": "fail",
@@ -159,17 +144,14 @@ async def claim_reward(request: ClaimRewardRequest, user_id: str = Depends(get_c
                 "shortage": reward_data['point_cost'] - user_points
             }
 
-        # Deduct points
         db.table("points").insert({
             "user_id": user_id,
             "value": -reward_data['point_cost'],
             "reason": f"Redeemed: {reward_data['name']}"
         }).execute()
 
-        # Generate QR code (simple token for now)
         qr_token = secrets.token_urlsafe(16)
 
-        # Add reward to user's claimed rewards
         db.table("user_rewards").insert({
             "user_id": user_id,
             "reward_id": request.reward_id,
@@ -192,9 +174,6 @@ async def claim_reward(request: ClaimRewardRequest, user_id: str = Depends(get_c
 
 @router.get("/claimed")
 async def get_claimed_rewards(user_id: str = Depends(get_current_user_id)):
-    """
-    Get user's claimed rewards
-    """
     try:
         db = get_db()
 
@@ -214,13 +193,9 @@ async def get_claimed_rewards(user_id: str = Depends(get_current_user_id)):
 
 @router.post("/use/{reward_id}")
 async def use_reward(reward_id: int, user_id: str = Depends(get_current_user_id)):
-    """
-    Mark a reward as used
-    """
     try:
         db = get_db()
 
-        # Find the user's reward
         user_reward = db.table("user_rewards") \
             .select("*") \
             .eq("id", reward_id) \
@@ -233,7 +208,6 @@ async def use_reward(reward_id: int, user_id: str = Depends(get_current_user_id)
         if user_reward.data[0].get("used_at"):
             raise HTTPException(status_code=400, detail="Reward already used")
 
-        # Mark as used
         db.table("user_rewards") \
             .update({"used_at": datetime.now().isoformat()}) \
             .eq("id", reward_id) \

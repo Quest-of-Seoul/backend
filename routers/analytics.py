@@ -1,4 +1,4 @@
-"""Analytics and reporting endpoints for location tracking data"""
+"""Analytics Router"""
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional, List
@@ -13,30 +13,18 @@ router = APIRouter()
 
 @router.get("/location-stats/district")
 async def get_district_stats(
-    start_date: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
+    start_date: Optional[str] = Query(None, description="Start Date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End Date (YYYY-MM-DD)"),
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    지자체별 위치 정보 통계
-    
-    Returns:
-        - district: 자치구
-        - visitor_count: 방문자 수 (익명화된 사용자 수)
-        - quest_count: 퀘스트 방문 횟수
-        - interest_count: 관심 표시 횟수
-        - avg_distance_km: 평균 거리 (km)
-    """
     try:
         db = get_db()
         
-        # 날짜 필터링
         query = db.table("anonymous_location_logs").select("*")
         
         if start_date:
             query = query.gte("created_at", start_date)
         if end_date:
-            # 종료 날짜는 하루 끝까지 포함
             end_datetime = datetime.fromisoformat(end_date) + timedelta(days=1)
             query = query.lt("created_at", end_datetime.isoformat())
         
@@ -49,7 +37,6 @@ async def get_district_stats(
                 "total_districts": 0
             }
         
-        # 지자체별 통계 집계
         district_stats = {}
         
         for log in result.data:
@@ -67,25 +54,20 @@ async def get_district_stats(
                     "distance_count": 0
                 }
             
-            # 방문자 수 (익명화된 사용자 ID 기준)
             anonymous_user_id = log.get("anonymous_user_id")
             if anonymous_user_id:
                 district_stats[district]["visitor_count"].add(anonymous_user_id)
             
-            # 퀘스트 방문 횟수
             if log.get("quest_id"):
                 district_stats[district]["quest_count"] += 1
             
-            # 관심 표시 횟수
             district_stats[district]["interest_count"] += 1
             
-            # 거리 정보
             distance = log.get("distance_from_quest_km")
             if distance is not None:
                 district_stats[district]["total_distance_km"] += float(distance)
                 district_stats[district]["distance_count"] += 1
         
-        # 통계 포맷팅
         stats_list = []
         for district, stats in district_stats.items():
             avg_distance = (
@@ -102,7 +84,6 @@ async def get_district_stats(
                 "avg_distance_km": round(avg_distance, 2)
             })
         
-        # 방문자 수 기준 내림차순 정렬
         stats_list.sort(key=lambda x: x["visitor_count"], reverse=True)
         
         logger.info(f"District stats: {len(stats_list)} districts")
@@ -124,22 +105,11 @@ async def get_district_stats(
 
 @router.get("/location-stats/quest")
 async def get_quest_stats(
-    quest_id: Optional[int] = Query(None, description="퀘스트 ID (선택적)"),
-    start_date: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
+    quest_id: Optional[int] = Query(None, description="Quest ID (Optional)"),
+    start_date: Optional[str] = Query(None, description="Start Date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End Date (YYYY-MM-DD)"),
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    퀘스트별 방문 통계
-    
-    Returns:
-        - quest_id: 퀘스트 ID
-        - quest_name: 퀘스트 이름
-        - visitor_count: 방문자 수
-        - visit_count: 방문 횟수
-        - district: 자치구
-        - avg_distance_km: 평균 거리 (km)
-    """
     try:
         db = get_db()
         
@@ -163,7 +133,6 @@ async def get_quest_stats(
                 "total_quests": 0
             }
         
-        # 퀘스트별 통계 집계
         quest_stats = {}
         
         for log in result.data:
@@ -190,21 +159,17 @@ async def get_quest_stats(
                     "distance_count": 0
                 }
             
-            # 방문자 수
             anonymous_user_id = log.get("anonymous_user_id")
             if anonymous_user_id:
                 quest_stats[q_id]["visitor_count"].add(anonymous_user_id)
             
-            # 방문 횟수
             quest_stats[q_id]["visit_count"] += 1
             
-            # 거리 정보
             distance = log.get("distance_from_quest_km")
             if distance is not None:
                 quest_stats[q_id]["total_distance_km"] += float(distance)
                 quest_stats[q_id]["distance_count"] += 1
         
-        # 통계 포맷팅
         stats_list = []
         for q_id, stats in quest_stats.items():
             avg_distance = (
@@ -222,7 +187,6 @@ async def get_quest_stats(
                 "avg_distance_km": round(avg_distance, 2)
             })
         
-        # 방문 횟수 기준 내림차순 정렬
         stats_list.sort(key=lambda x: x["visit_count"], reverse=True)
         
         logger.info(f"Quest stats: {len(stats_list)} quests")
@@ -244,19 +208,11 @@ async def get_quest_stats(
 
 @router.get("/location-stats/time")
 async def get_time_stats(
-    start_date: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
-    group_by: str = Query("hour", description="그룹화 기준: hour, day, week"),
+    start_date: Optional[str] = Query(None, description="Start Date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End Date (YYYY-MM-DD)"),
+    group_by: str = Query("hour", description="Group by: hour, day, week"),
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    시간대별 통계
-    
-    Returns:
-        - time_period: 시간대 (예: "2024-01-01 14:00", "2024-01-01", "2024-W01")
-        - visitor_count: 방문자 수
-        - visit_count: 방문 횟수
-    """
     try:
         db = get_db()
         
@@ -277,7 +233,6 @@ async def get_time_stats(
                 "total_periods": 0
             }
         
-        # 시간대별 통계 집계
         time_stats = {}
         
         for log in result.data:
@@ -287,13 +242,11 @@ async def get_time_stats(
             
             dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
             
-            # 그룹화 기준에 따라 시간대 키 생성
             if group_by == "hour":
                 time_key = dt.strftime("%Y-%m-%d %H:00")
             elif group_by == "day":
                 time_key = dt.strftime("%Y-%m-%d")
             elif group_by == "week":
-                # ISO 주 번호 사용
                 year, week, _ = dt.isocalendar()
                 time_key = f"{year}-W{week:02d}"
             else:
@@ -306,15 +259,12 @@ async def get_time_stats(
                     "visit_count": 0
                 }
             
-            # 방문자 수
             anonymous_user_id = log.get("anonymous_user_id")
             if anonymous_user_id:
                 time_stats[time_key]["visitor_count"].add(anonymous_user_id)
             
-            # 방문 횟수
             time_stats[time_key]["visit_count"] += 1
         
-        # 통계 포맷팅
         stats_list = []
         for time_key, stats in time_stats.items():
             stats_list.append({
@@ -323,7 +273,6 @@ async def get_time_stats(
                 "visit_count": stats["visit_count"]
             })
         
-        # 시간대 순서대로 정렬
         stats_list.sort(key=lambda x: x["time_period"])
         
         logger.info(f"Time stats: {len(stats_list)} periods (group_by={group_by})")
@@ -346,20 +295,10 @@ async def get_time_stats(
 
 @router.get("/location-stats/summary")
 async def get_summary_stats(
-    start_date: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
+    start_date: Optional[str] = Query(None, description="Start Date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End Date (YYYY-MM-DD)"),
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    전체 요약 통계
-    
-    Returns:
-        - total_visitors: 총 방문자 수
-        - total_visits: 총 방문 횟수
-        - total_quests: 총 퀘스트 수
-        - total_districts: 총 자치구 수
-        - avg_distance_km: 평균 거리 (km)
-    """
     try:
         db = get_db()
         
@@ -385,7 +324,6 @@ async def get_summary_stats(
                 }
             }
         
-        # 통계 집계
         visitors = set()
         quests = set()
         districts = set()
@@ -393,22 +331,18 @@ async def get_summary_stats(
         distance_count = 0
         
         for log in result.data:
-            # 방문자 수
             anonymous_user_id = log.get("anonymous_user_id")
             if anonymous_user_id:
                 visitors.add(anonymous_user_id)
             
-            # 퀘스트 수
             quest_id = log.get("quest_id")
             if quest_id:
                 quests.add(quest_id)
             
-            # 자치구 수
             district = log.get("district")
             if district:
                 districts.add(district)
             
-            # 거리 정보
             distance = log.get("distance_from_quest_km")
             if distance is not None:
                 total_distance += float(distance)

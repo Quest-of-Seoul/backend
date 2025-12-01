@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 
 def upload_audio_to_storage(audio_bytes: bytes, filename: Optional[str] = None) -> Optional[str]:
-    """Upload audio file to Supabase Storage"""
     try:
         supabase: Client = get_db()
 
@@ -54,7 +53,6 @@ def compress_and_upload_image(
     quality: int = 85,
     bucket: str = "images"
 ) -> Optional[str]:
-    """Compress and upload image to Supabase Storage"""
     try:
         supabase: Client = get_db()
         
@@ -102,13 +100,11 @@ def compress_and_upload_image(
             }
         )
         
-        # 절대경로로 강제 URL 생성 (Supabase get_public_url 대신)
         SUPABASE_URL = os.getenv("SUPABASE_URL")
         if not SUPABASE_URL:
             logger.error("SUPABASE_URL not set in environment")
             return None
         
-        # 끝에 슬래시 제거
         SUPABASE_URL = SUPABASE_URL.rstrip('/')
         public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{filename}"
         

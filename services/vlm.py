@@ -1,4 +1,4 @@
-"""VLM Service - GPT-4V Image Analysis"""
+"""VLM Service"""
 
 import os
 import base64
@@ -27,7 +27,6 @@ except Exception as e:
 
 
 def compress_image(image_bytes: bytes, max_size: int = 1024) -> bytes:
-    """Compress image for API efficiency"""
     try:
         img = Image.open(BytesIO(image_bytes))
         
@@ -53,7 +52,6 @@ def analyze_image_gpt4v(
     prompt: str,
     max_tokens: int = 500
 ) -> Optional[str]:
-    """Analyze image using GPT-4o-mini"""
     if not OPENAI_AVAILABLE:
         logger.error("OpenAI not available")
         return None
@@ -97,7 +95,6 @@ def analyze_place_image(
     language: str = "en",
     quest_context: Optional[Dict] = None
 ) -> Optional[str]:
-    """Analyze place image"""
     prompt = build_place_analysis_prompt(nearby_places, language, quest_context)
     
     if not OPENAI_AVAILABLE:
@@ -117,9 +114,7 @@ def build_place_analysis_prompt(
     nearby_places: Optional[List[Dict]] = None,
     language: str = "en",
     quest_context: Optional[Dict] = None
-) -> str:
-    """Build place analysis prompt"""
-    
+) -> str:    
     prompt = """You are a Seoul tourism expert. Analyze this image and provide:
 
 1. Identify the exact place/location
@@ -134,7 +129,6 @@ Description: [2-3 sentences describing the place]
 Features: [visual characteristics and special points]
 Confidence: [high/medium/low]"""
     
-    # 퀘스트 컨텍스트 추가
     if quest_context:
         quest_name = quest_context.get("name") or quest_context.get("title", "")
         quest_description = quest_context.get("description", "")
@@ -171,7 +165,6 @@ Confidence: [high/medium/low]"""
 
 
 def extract_place_info_from_vlm_response(vlm_response: str) -> Dict[str, str]:
-    """Extract place information from VLM response"""
     info = {
         "place_name": "",
         "category": "",
@@ -217,7 +210,6 @@ def calculate_confidence_score(
     vector_similarity: Optional[float] = None,
     gps_distance_km: Optional[float] = None
 ) -> float:
-    """Calculate confidence score"""
     score = 0.0
     
     confidence_map = {"high": 0.4, "medium": 0.25, "low": 0.1}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Comprehensive API Test Script for Quest of Seoul"""
+"""Comprehensive API Test Script"""
 
 import requests
 import base64
@@ -12,7 +12,6 @@ TEST_USER_ID = "test-user-001"
 
 
 def test_root():
-    """Test root endpoint"""
     print("\n=== Root Endpoint ===")
     response = requests.get(f"{BASE_URL}/")
     print(f"GET / : {response.status_code}")
@@ -20,7 +19,6 @@ def test_root():
 
 
 def test_health():
-    """Test health endpoints"""
     print("\n=== Health Check ===")
     
     response = requests.get(f"{BASE_URL}/health")
@@ -33,7 +31,6 @@ def test_health():
 
 
 def test_docent_chat():
-    """Test docent chat"""
     print("\n=== Docent Chat ===")
     
     payload = {
@@ -56,7 +53,6 @@ def test_docent_chat():
 
 
 def test_docent_quiz():
-    """Test quiz generation"""
     print("\n=== Docent Quiz ===")
     
     params = {"landmark": "경복궁", "language": "ko"}
@@ -74,7 +70,6 @@ def test_docent_quiz():
 
 
 def test_docent_tts():
-    """Test TTS generation"""
     print("\n=== Docent TTS ===")
     
     payload = {
@@ -94,7 +89,6 @@ def test_docent_tts():
 
 
 def test_docent_history():
-    """Test chat history"""
     print("\n=== Docent History ===")
     
     response = requests.get(f"{BASE_URL}/docent/history/{TEST_USER_ID}?limit=5")
@@ -108,7 +102,6 @@ def test_docent_history():
 
 
 def test_quest_list():
-    """Test get all quests"""
     print("\n=== Quest List ===")
     
     response = requests.get(f"{BASE_URL}/quest/list")
@@ -125,7 +118,6 @@ def test_quest_list():
 
 
 def test_quest_nearby():
-    """Test nearby quests"""
     print("\n=== Quest Nearby ===")
     
     payload = {
@@ -148,7 +140,6 @@ def test_quest_nearby():
 
 
 def test_quest_progress():
-    """Test quest progress update"""
     print("\n=== Quest Progress ===")
     
     payload = {
@@ -169,7 +160,6 @@ def test_quest_progress():
 
 
 def test_quest_user():
-    """Test get user quests"""
     print("\n=== Quest User ===")
     
     response = requests.get(f"{BASE_URL}/quest/user/{TEST_USER_ID}")
@@ -183,7 +173,6 @@ def test_quest_user():
 
 
 def test_quest_detail():
-    """Test quest detail"""
     print("\n=== Quest Detail ===")
     
     response = requests.get(f"{BASE_URL}/quest/1")
@@ -198,7 +187,6 @@ def test_quest_detail():
 
 
 def test_reward_points():
-    """Test get user points"""
     print("\n=== Reward Points ===")
     
     response = requests.get(f"{BASE_URL}/reward/points/{TEST_USER_ID}")
@@ -213,7 +201,6 @@ def test_reward_points():
 
 
 def test_reward_add_points():
-    """Test add points"""
     print("\n=== Reward Add Points ===")
     
     payload = {
@@ -234,7 +221,6 @@ def test_reward_add_points():
 
 
 def test_reward_list():
-    """Test get available rewards"""
     print("\n=== Reward List ===")
     
     response = requests.get(f"{BASE_URL}/reward/list")
@@ -251,7 +237,6 @@ def test_reward_list():
 
 
 def test_reward_claimed():
-    """Test get claimed rewards"""
     print("\n=== Reward Claimed ===")
     
     response = requests.get(f"{BASE_URL}/reward/claimed/{TEST_USER_ID}")
@@ -265,7 +250,6 @@ def test_reward_claimed():
 
 
 def test_reward_claim():
-    """Test claim reward"""
     print("\n=== Reward Claim ===")
     
     payload = {
@@ -288,7 +272,6 @@ def test_reward_claim():
 
 
 def test_reward_use():
-    """Test use reward"""
     print("\n=== Reward Use ===")
     
     params = {"user_id": TEST_USER_ID}
@@ -305,7 +288,6 @@ def test_reward_use():
 
 
 def test_vlm_analyze(image_path: str = None):
-    """Test VLM analyze endpoint"""
     print("\n=== VLM Analyze ===")
     
     if not image_path:
@@ -350,7 +332,6 @@ def test_vlm_analyze(image_path: str = None):
 
 
 def test_vlm_similar(image_path: str = None):
-    """Test similar image search"""
     print("\n=== VLM Similar ===")
     
     if not image_path:
@@ -384,7 +365,6 @@ def test_vlm_similar(image_path: str = None):
 
 
 def test_vlm_nearby_places():
-    """Test nearby places"""
     print("\n=== VLM Nearby Places ===")
     
     params = {
@@ -405,7 +385,6 @@ def test_vlm_nearby_places():
 
 
 def test_recommend_similar_places(image_path: str = None):
-    """Test place recommendation"""
     print("\n=== Recommend Similar Places ===")
     
     if not image_path:
@@ -445,7 +424,6 @@ def test_recommend_similar_places(image_path: str = None):
 
 
 def test_recommend_nearby_quests():
-    """Test nearby quests"""
     print("\n=== Recommend Nearby Quests ===")
     
     params = {
@@ -466,7 +444,6 @@ def test_recommend_nearby_quests():
 
 
 def test_recommend_category():
-    """Test quests by category"""
     print("\n=== Recommend Category ===")
     
     response = requests.get(f"{BASE_URL}/recommend/quests/category/역사유적?limit=10")
@@ -480,7 +457,6 @@ def test_recommend_category():
 
 
 def test_recommend_stats():
-    """Test recommendation stats"""
     print("\n=== Recommend Stats ===")
     
     response = requests.get(f"{BASE_URL}/recommend/stats")
@@ -496,7 +472,6 @@ def test_recommend_stats():
 
 
 def test_recommend_quest_detail():
-    """Test quest detail"""
     print("\n=== Recommend Quest Detail ===")
     
     quest_id = "1"
@@ -516,7 +491,6 @@ def test_recommend_quest_detail():
 
 
 def test_recommend_submit():
-    """Test quiz submit"""
     print("\n=== Recommend Quiz Submit ===")
     
     quest_id = "1"
@@ -540,7 +514,6 @@ def test_recommend_submit():
 
 
 def test_vlm_health():
-    """Test VLM health"""
     print("\n=== VLM Health ===")
     
     response = requests.get(f"{BASE_URL}/vlm/health")
@@ -556,7 +529,6 @@ def test_vlm_health():
 
 
 def main():
-    """Run tests"""
     import argparse
     
     parser = argparse.ArgumentParser(description="API Test Script")

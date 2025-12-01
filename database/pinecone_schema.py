@@ -43,12 +43,6 @@ class PineconeSchemaManager:
         logger.info("=" * 70)
     
     def setup_pinecone_schema(self, insert_sample_data: bool = True) -> bool:
-        """
-        Setup Pinecone index and optionally insert sample data
-        
-        Args:
-            insert_sample_data: Whether to insert sample data (default: True)
-        """
         self.print_header("Setup Pinecone Schema")
         
         try:

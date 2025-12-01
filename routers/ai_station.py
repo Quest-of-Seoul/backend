@@ -1,4 +1,4 @@
-"""AI Station Router - Chat list and integrated features"""
+"""AI Station Router"""
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query
 from pydantic import BaseModel
@@ -42,7 +42,7 @@ class QuestRAGChatRequest(BaseModel):
 
 class QuestVLMChatRequest(BaseModel):
     quest_id: int
-    image: str  # base64
+    image: str
     user_message: Optional[str] = None
     language: str = "en"
     prefer_url: bool = False
@@ -51,29 +51,26 @@ class QuestVLMChatRequest(BaseModel):
 
 
 class STTTTSRequest(BaseModel):
-    audio: str  # base64 encoded audio
+    audio: str
     language_code: str = "en-US"
     prefer_url: bool = False
 
 
 class RouteRecommendRequest(BaseModel):
-    preferences: dict  # User preference information
+    preferences: dict
     must_visit_place_id: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    start_latitude: Optional[float] = None  # 출발 지점 위도 (지정 시 사용)
-    start_longitude: Optional[float] = None  # 출발 지점 경도 (지정 시 사용)
-    radius_km: Optional[float] = None  # 검색 반경 (km) - anywhere 클릭 시 사용자가 설정 가능 (기본값: 15.0)
+    start_latitude: Optional[float] = None
+    start_longitude: Optional[float] = None
+    radius_km: Optional[float] = None
 
 
 def format_time_ago(created_at_str: str) -> str:
-    """Convert time to 'X minutes ago' or 'MM/DD' format"""
     try:
         from datetime import datetime, timezone, timedelta
         
-        # Convert string to datetime
         if isinstance(created_at_str, str):
-            # Parse ISO format string
             if 'T' in created_at_str:
                 dt_str = created_at_str.replace('Z', '+00:00')
                 if '+' in dt_str or dt_str.endswith('+00:00'):
@@ -89,26 +86,22 @@ def format_time_ago(created_at_str: str) -> str:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
         
-        # Convert UTC to KST (UTC+9)
         kst_offset = timedelta(hours=9)
         dt_kst = dt.astimezone(timezone(kst_offset))
         
         now = datetime.now(timezone(kst_offset))
         diff = now - dt_kst
         
-        # Minutes ago
-        if diff.total_seconds() < 3600:  # Less than 1 hour
+        if diff.total_seconds() < 3600:
             minutes = int(diff.total_seconds() / 60)
             if minutes < 1:
                 return "Just now"
             return f"{minutes} minutes ago"
         
-        # Hours ago
-        if diff.total_seconds() < 86400:  # Less than 24 hours
+        if diff.total_seconds() < 86400:
             hours = int(diff.total_seconds() / 3600)
             return f"{hours} hours ago"
         
-        # Month and day
         return dt_kst.strftime("%m/%d")
     
     except Exception as e:
@@ -117,15 +110,7 @@ def format_time_ago(created_at_str: str) -> str:
 
 
 def fetch_quest_context(quest_id: int, db=None) -> Dict[str, Any]:
-    """
-    Fetch quest and associated place metadata for quest mode chat.
-    
-    중요: Quest_id에 해당하는 데이터만 조회합니다.
-    - 다른 Quest나 Place의 데이터는 절대 포함하지 않음
-    - 추후 RAG 검색 추가 시에도 quest_id로 필터링 필수
-    """
     db = db or get_db()
-    # Quest_id로만 필터링하여 해당 Quest의 데이터만 조회
     quest_result = db.table("quests").select("*, places(*)").eq("id", quest_id).single().execute()
     if not quest_result.data:
         raise HTTPException(status_code=404, detail="Quest not found")
@@ -140,13 +125,6 @@ def fetch_quest_context(quest_id: int, db=None) -> Dict[str, Any]:
 
 
 def build_quest_context_block(quest: Dict[str, Any]) -> str:
-    """
-    Build structured context text for LLM prompts.
-    
-    중요: Quest 데이터만 사용하여 컨텍스트 구성
-    - 다른 Quest나 Place의 데이터는 포함하지 않음
-    - Quest_id에 해당하는 데이터만 기반으로 답변 생성
-    """
     place = quest.get("place") or {}
     lines = [
         f"Quest Place: {quest.get('name') or place.get('name', '')}",
@@ -173,50 +151,33 @@ async def get_chat_list(
     function_type: Optional[str] = Query(None),
     user_id: str = Depends(get_current_user_id)
 ):
-    """
-    Get chat list
-    - mode: explore | quest
-    - function_type:
-        rag_chat, vlm_chat, route_recommend
-    """
     try:
         db = get_db()
 
-        # Base query
         query = db.table("chat_logs").select("*").eq("user_id", user_id)
 
-        # Filter by mode + function_type combination
         if mode and function_type:
-            # Filter exactly when both are specified
             query = query.eq("mode", mode).eq("function_type", function_type)
 
         elif mode:
             query = query.eq("mode", mode)
 
-            # Limit function_type based on mode
             if mode == "quest":
-                # In quest mode, only rag_chat + vlm_chat
                 query = query.in_("function_type", ["rag_chat", "vlm_chat"])
             elif mode == "explore":
-                # In explore mode, rag_chat + route
                 query = query.in_("function_type", ["rag_chat", "route_recommend"])
 
         elif function_type:
-            # Only function_type specified
             query = query.eq("function_type", function_type)
 
-            # route_recommend only exists in explore mode
             if function_type == "route_recommend":
                 query = query.eq("mode", "explore")
 
         else:
-            # Default: explore + rag_chat
             query = query.eq("mode", "explore").eq("function_type", "rag_chat")
 
-        # Get results
         result = query.order("created_at", desc=True).limit(limit * 10).execute()
 
-        # Group by session
         sessions = {}
         vlm_count = 0
         rag_count = 0
@@ -232,7 +193,6 @@ async def get_chat_list(
             if not session_id:
                 continue
 
-            # Create new session
             if session_id not in sessions:
                 title = chat.get("title") or (chat.get("user_message") or "")[:50]
 
@@ -248,7 +208,6 @@ async def get_chat_list(
                     "chats": []
                 }
 
-            # Add message to session
             sessions[session_id]["chats"].append({
                 "id": chat.get("id"),
                 "user_message": chat.get("user_message"),
@@ -263,12 +222,10 @@ async def get_chat_list(
                 "created_at": chat.get("created_at"),
             })
 
-            # Update to latest
             if chat.get("created_at") > sessions[session_id]["updated_at"]:
                 sessions[session_id]["updated_at"] = chat.get("created_at")
                 sessions[session_id]["time_ago"] = format_time_ago(chat.get("created_at"))
 
-        # Sort
         session_list = sorted(
             sessions.values(),
             key=lambda x: x["updated_at"],
@@ -288,10 +245,6 @@ async def get_chat_list(
 
 @router.get("/chat-session/{session_id}")
 async def get_chat_session(session_id: str, user_id: str = Depends(get_current_user_id)):
-    """
-    Get chat history for a specific session
-    Returns full conversation when user clicks a session from history
-    """
     try:
         db = get_db()
         
@@ -300,7 +253,6 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
         if not result.data:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        # Session information
         first_chat = result.data[0]
         session_info = {
             "session_id": session_id,
@@ -311,7 +263,6 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
             "created_at": first_chat.get("created_at")
         }
         
-        # Chat list
         chats = []
         for chat in result.data:
             chat_data = {
@@ -322,7 +273,6 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
                 "created_at": chat.get("created_at")
             }
             
-            # Add Plan Chat specific fields
             if chat.get("function_type") == "route_recommend":
                 chat_data.update({
                     "title": chat.get("title"),
@@ -354,24 +304,17 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
 
 @router.post("/explore/rag-chat")
 async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    Explore mode - General RAG chat (text only storage)
-    Generate responses by vector searching place text embeddings stored in Pinecone
-    """
     try:
         logger.info(f"Explore RAG chat: {user_id}")
         
-        # Generate or use existing session ID
         session_id = request.chat_session_id
         if not session_id:
             session_id = str(uuid.uuid4())
         
-        # Generate embedding from user message and search for similar places
         text_embedding = generate_text_embedding(request.user_message)
         
         if not text_embedding:
             logger.warning("Failed to generate text embedding, falling back to DB search")
-            # Fallback: DB text search
             db = get_db()
             places_result = db.rpc(
                 "search_places_by_rag_text",
@@ -382,14 +325,13 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
             ).execute()
             
             context = ""
-            detected_place_name = None  # 특정 장소 이름 추출
+            detected_place_name = None
             if places_result.data:
                 place_names = [p.get("name", "") for p in places_result.data[:3]]
                 if place_names:
-                    detected_place_name = place_names[0]  # 첫 번째 장소를 주요 장소로 사용
+                    detected_place_name = place_names[0]
                 context = f"관련 장소: {', '.join(place_names)}\n\n"
         else:
-            # Pinecone vector search
             from services.pinecone_store import search_text_embeddings
             
             similar_places = search_text_embeddings(
@@ -398,15 +340,13 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
                 match_count=5
             )
             
-            # Build context
             context_parts = []
-            detected_place_name = None  # 특정 장소 이름 추출
+            detected_place_name = None
             if similar_places:
                 context_parts.append("Related Places Information:")
                 for idx, sp in enumerate(similar_places[:3], 1):
                     place = sp.get("place")
                     if place:
-                        # 첫 번째 장소를 주요 장소로 사용
                         if idx == 1 and place.get("name"):
                             detected_place_name = place['name']
                         
@@ -426,7 +366,6 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
                 context_parts.append("")
                 context = "\n".join(context_parts)
             else:
-                # Fallback to DB search if vector search fails
                 db = get_db()
                 places_result = db.rpc(
                     "search_places_by_rag_text",
@@ -439,12 +378,11 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
                 if places_result.data:
                     place_names = [p.get("name", "") for p in places_result.data[:3]]
                     if place_names:
-                        detected_place_name = place_names[0]  # 첫 번째 장소를 주요 장소로 사용
+                        detected_place_name = place_names[0]
                     context = f"Related Places: {', '.join(place_names)}\n\n"
                 else:
                     context = ""
         
-        # Get previous conversation history (multi-turn conversation support)
         chat_history = ""
         if session_id:
             try:
@@ -459,7 +397,7 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
                 
                 if history_result.data and len(history_result.data) > 0:
                     history_parts = ["Previous Conversation:"]
-                    for chat in reversed(history_result.data):  # Sort chronologically
+                    for chat in reversed(history_result.data):
                         if chat.get("user_message"):
                             history_parts.append(f"User: {chat['user_message']}")
                         if chat.get("ai_response"):
@@ -469,10 +407,8 @@ async def explore_rag_chat(request: ExploreRAGChatRequest, user_id: str = Depend
             except Exception as hist_error:
                 logger.warning(f"Failed to load chat history: {hist_error}")
         
-        # 특정 장소 이름이 있으면 해당 장소로, 없으면 "Seoul Travel"로 설정
         landmark_name = detected_place_name if detected_place_name else "Seoul Travel"
         
-        # Generate AI response
         full_prompt = f"""{context}{chat_history}Question: {request.user_message}
 
 Please provide a friendly and helpful response based on the above information."""
@@ -483,7 +419,6 @@ Please provide a friendly and helpful response based on the above information.""
             language="en"
         )
         
-        # Generate TTS
         audio_url = None
         audio_base64 = None
         
@@ -505,15 +440,13 @@ Please provide a friendly and helpful response based on the above information.""
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # Save chat log (text only)
-        # Check if this is the first message to set title
         try:
             existing_session = db.table("chat_logs").select("id").eq("chat_session_id", session_id).limit(1).execute()
             is_first_message = not existing_session.data or len(existing_session.data) == 0
             
             title = None
             if is_first_message:
-                title = request.user_message[:50]  # Use first question as title
+                title = request.user_message[:50]
             
             db.table("chat_logs").insert({
                 "user_id": user_id,
@@ -548,23 +481,6 @@ Please provide a friendly and helpful response based on the above information.""
 
 @router.post("/quest/rag-chat")
 async def quest_rag_chat(request: QuestRAGChatRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    AI Plus 챗 (Quest RAG 챗)
-    
-    핵심 원칙:
-    1. Quest_id에 해당하는 DB 데이터만 사용
-    2. 해당 데이터를 기반으로만 대답
-    3. 추후 고도화를 위해 DB를 따로 분리해야 함 (Quest별 독립 데이터베이스)
-    
-    현재 구현:
-    - Quest와 Place 테이블에서 quest_id로 필터링하여 데이터 조회
-    - 해당 Quest의 데이터만 프롬프트에 포함하여 AI 응답 생성
-    
-    향후 RAG 검색 추가 시:
-    - 반드시 quest_id 또는 place_id로 필터링해야 함
-    - 벡터 스토어 검색 시에도 quest_id 메타데이터로 필터링 필요
-    - Quest별로 독립적인 벡터 스토어 네임스페이스 사용 권장
-    """
     try:
         if not request.quest_id:
             raise HTTPException(status_code=400, detail="quest_id is required for quest chat")
@@ -579,22 +495,18 @@ async def quest_rag_chat(request: QuestRAGChatRequest, user_id: str = Depends(ge
         landmark = quest.get("name") or quest.get("title") or request.landmark or "Quest Place"
         context_block = build_quest_context_block(quest)
         
-        # Quest 데이터만을 기반으로 프롬프트 구성
-        # 다른 Quest나 Place의 데이터는 포함하지 않음
         user_prompt = f"""The following is information about the quest place the user is currently working on:
 {context_block}
 
 Please answer the following question based on the above information.
 Question: {request.user_message}"""
         
-        # AI 응답 생성 (Quest 데이터만 사용)
         ai_response = generate_docent_message(
             landmark=landmark,
             user_message=user_prompt,
             language="en"
         )
         
-        # Generate TTS
         audio_url = None
         audio_base64 = None
         
@@ -616,7 +528,6 @@ Question: {request.user_message}"""
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # Save quest chat to history (read-only)
         try:
             existing_session = db.table("chat_logs").select("id").eq("chat_session_id", session_id).limit(1).execute()
             is_first_message = not existing_session.data
@@ -658,18 +569,6 @@ Question: {request.user_message}"""
 
 @router.post("/quest/vlm-chat")
 async def quest_vlm_chat(request: QuestVLMChatRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    AI Plus 챗 (Quest VLM 챗)
-    
-    핵심 원칙:
-    1. Quest_id에 해당하는 DB 데이터만 사용
-    2. 해당 데이터를 기반으로만 대답
-    3. 추후 고도화를 위해 DB를 따로 분리해야 함 (Quest별 독립 데이터베이스)
-    
-    현재 구현:
-    - Quest와 Place 테이블에서 quest_id로 필터링하여 데이터 조회
-    - Quest 컨텍스트를 VLM 분석에 포함하여 해당 Quest에 맞는 분석 수행
-    """
     try:
         if not request.quest_id:
             raise HTTPException(status_code=400, detail="quest_id is required for quest VLM chat")
@@ -681,49 +580,40 @@ async def quest_vlm_chat(request: QuestVLMChatRequest, user_id: str = Depends(ge
         session_id = request.chat_session_id or str(uuid.uuid4())
         quest = fetch_quest_context(request.quest_id, db=db)
         
-        # Decode image
         try:
             image_bytes = base64.b64decode(request.image)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid base64 image: {str(e)}")
         
-        # Upload image
         image_url = compress_and_upload_image(
             image_bytes=image_bytes,
             max_size=1920,
             quality=85
         )
         
-        # VLM analysis (using VLM service directly)
         from services.vlm import analyze_place_image, extract_place_info_from_vlm_response, calculate_confidence_score
         from services.db import search_places_by_radius, get_place_by_name, save_vlm_log
         from services.embedding import generate_image_embedding, hash_image
         from services.optimized_search import search_with_gps_filter
         
-        # Search nearby places (empty list if no GPS info)
-        # 중요: Quest_id에 해당하는 데이터만 사용하므로 nearby_places는 비워둠
         nearby_places = []
         
-        # VLM analysis (with quest context)
-        # Quest 데이터만을 컨텍스트로 사용하여 해당 Quest에 맞는 분석 수행
         vlm_response = analyze_place_image(
             image_bytes=image_bytes,
             nearby_places=nearby_places,
             language="en",
-            quest_context=quest  # Quest_id에 해당하는 데이터만 포함
+            quest_context=quest
         )
         
         if not vlm_response:
             raise HTTPException(status_code=503, detail="VLM service unavailable")
         
-        # Extract place information
         place_info = extract_place_info_from_vlm_response(vlm_response)
         matched_place = None
         
         if place_info.get("place_name"):
             matched_place = get_place_by_name(place_info["place_name"], fuzzy=True)
         
-        # Generate final description
         final_description = vlm_response
         if matched_place:
             from services.ai import generate_docent_message
@@ -754,7 +644,6 @@ Based on the above information, please introduce this place in a friendly and en
 Current Quest Reference Information:
 {quest_context}"""
         
-        # Generate TTS
         audio_url = None
         audio_base64 = None
         
@@ -776,7 +665,6 @@ Current Quest Reference Information:
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
-        # Save VLM analysis log (vlm_logs - for analysis)
         try:
             logger.info("Saving VLM log to vlm_logs...")
             image_hash = hash_image(image_bytes)
@@ -795,11 +683,9 @@ Current Quest Reference Information:
         except Exception as vlm_log_error:
             logger.error(f"Failed to save VLM log: {vlm_log_error}", exc_info=True)
         
-        # Save to history (chat_logs - for chat history)
         try:
             logger.info(f"Saving VLM chat to chat_logs (session: {session_id})...")
             
-            # Image URL 검증
             if not image_url:
                 logger.error("Image URL is empty - upload may have failed!")
                 raise HTTPException(status_code=500, detail="Image upload failed: url is empty")
@@ -853,14 +739,9 @@ Current Quest Reference Information:
 
 @router.post("/stt-tts")
 async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    STT + TTS integrated endpoint
-    Converts audio to text, then converts that text back to speech
-    """
     try:
         logger.info(f"STT+TTS request: {user_id}")
         
-        # STT: Convert audio to text
         transcribed_text = speech_to_text_from_base64(
             audio_base64=request.audio,
             language_code=request.language_code
@@ -869,7 +750,6 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
         if not transcribed_text:
             raise HTTPException(status_code=400, detail="STT transcription failed")
         
-        # TTS: Convert text back to speech
         audio_url = None
         audio_base64 = None
         
@@ -904,16 +784,11 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
 
 @router.post("/route-recommend")
 async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    Travel route recommendation
-    Understand user preferences through preliminary questions and recommend 4 quests
-    """
     try:
         logger.info(f"Route recommend: {user_id}, radius_km={request.radius_km}")
         
         db = get_db()
         
-        # 필수 방문 장소가 있으면 포함
         must_visit_quest = None
         if request.must_visit_place_id:
             place_result = db.table("places").select("*, quests(*)").eq("id", request.must_visit_place_id).execute()
@@ -922,18 +797,14 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 quests = place.get("quests", [])
                 if quests and len(quests) > 0:
                     must_visit_quest = dict(quests[0])
-                    # place 정보 추가 (district, place_image_url 등)
                     must_visit_quest["district"] = place.get("district")
                     must_visit_quest["place_image_url"] = place.get("image_url")
         
-        # 사용자 취향 기반 추천 알고리즘 구현
         import math
         
-        # 1. 사용자 취향 분석
         preferences = request.preferences or {}
-        preferred_categories = []  # 다중 선택 지원
+        preferred_categories = []
         
-        # category 처리
         if preferences.get("category"):
             category = preferences["category"]
             if isinstance(category, dict):
@@ -943,42 +814,33 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             elif isinstance(category, str):
                 preferred_categories.append(category)
         
-        # theme 처리 (다중 선택 지원: 리스트 또는 단일 값)
         if preferences.get("theme"):
             theme = preferences["theme"]
             if isinstance(theme, list):
-                # 리스트인 경우: ["Culture", "History", "Food"] 등
                 for t in theme:
                     if isinstance(t, dict):
                         preferred_categories.append(t.get("name"))
                     elif isinstance(t, str):
                         preferred_categories.append(t)
             elif isinstance(theme, dict):
-                # 단일 dict인 경우
                 cat_name = theme.get("name")
                 if cat_name:
                     preferred_categories.append(cat_name)
             elif isinstance(theme, str):
-                # 단일 문자열인 경우 (하위 호환성)
                 preferred_categories.append(theme)
         
-        # 중복 제거 및 정규화
-        preferred_categories = list(set(preferred_categories))  # 중복 제거
+        preferred_categories = list(set(preferred_categories))
         
-        # 2. 사용자의 완료한 퀘스트 조회 (다양성 점수 계산용)
         completed_quests_result = db.table("user_quests").select("quest_id, quests(category)").eq("user_id", user_id).eq("status", "completed").execute()
         completed_categories = set()
         completed_quest_ids = set()
         
-        # 카테고리 정규화 함수 (아래에서 정의되지만 미리 선언)
         def normalize_category(category: str) -> str:
-            """카테고리를 영어로 정규화 (한글->영어 매핑)"""
             if not category:
                 return ""
             
             category_lower = category.lower().strip()
             
-            # 한글-영어 매핑
             category_map = {
                 # History 관련
                 "역사": "history",
@@ -1014,12 +876,9 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 "outdoor": "park",
             }
             
-            # 매핑에 있으면 변환
             if category_lower in category_map:
                 return category_map[category_lower]
             
-            # 이미 영어면 소문자로 반환 (비교 시 일관성 유지)
-            # 'History' -> 'history', 'Attractions' -> 'attractions' 등
             return category_lower
         
         if completed_quests_result.data:
@@ -1034,14 +893,10 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                     else:
                         category = None
                     if category:
-                        # 카테고리를 정규화하여 저장
                         normalized = normalize_category(category)
                         if normalized:
                             completed_categories.add(normalized)
         
-        # 3. 퀘스트 후보 조회
-        # 사용자가 설정한 거리 또는 기본값 15km 사용
-        # Pydantic 기본값 때문에 request.radius_km가 None이 아닐 수 있으므로 명시적으로 확인
         if request.radius_km is not None:
             search_radius = float(request.radius_km)
         else:
@@ -1054,12 +909,11 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             nearby_result = await get_nearby_quests_route(
                 latitude=request.latitude,
                 longitude=request.longitude,
-                radius_km=search_radius,  # 사용자가 설정한 거리 사용
+                radius_km=search_radius,
                 limit=50
             )
             candidate_quests = nearby_result.get("quests", [])
         else:
-            # 위치 정보가 없으면 전체 퀘스트에서 추천
             quests_result = db.table("quests").select("*, places(*)").eq("is_active", True).limit(50).execute()
             candidate_quests = []
             for q in quests_result.data:
@@ -1072,16 +926,13 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                     quest["place_image_url"] = place.get("image_url") if isinstance(place, dict) else None
                 candidate_quests.append(quest)
         
-        # 4. 각 퀘스트에 대해 점수 계산
         def calculate_distance_score(lat1: float, lon1: float, lat2: float, lon2: float, max_radius: float = None) -> float:
-            """거리 기반 점수 (0.0 ~ 1.0, 가까울수록 높지만 차이를 완만하게)"""
             if not (lat1 and lon1 and lat2 and lon2):
-                return 0.5  # 위치 정보가 없으면 중간 점수
+                return 0.5
             
-            # 사용자가 설정한 거리 또는 기본값 15km 사용
             radius_limit = max_radius if max_radius is not None else search_radius
             
-            R = 6371  # 지구 반지름 (km)
+            R = 6371
             lat1_rad = math.radians(lat1)
             lat2_rad = math.radians(lat2)
             delta_lat = math.radians(lat2 - lat1)
@@ -1093,36 +944,25 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             c = 2 * math.asin(math.sqrt(a))
             distance_km = R * c
             
-            # 설정한 거리 이내면 거리 점수 적용 (더 완만한 곡선 사용)
             if distance_km <= radius_limit:
-                # 제곱근을 사용하여 가까운 곳과 먼 곳의 점수 차이를 줄임
-                # 예: 15km 반경에서
-                # 0.5km: 1.0 - sqrt(0.5/15) = 0.817
-                # 5km: 1.0 - sqrt(5/15) = 0.577
-                # 10km: 1.0 - sqrt(10/15) = 0.333
-                # 15km: 1.0 - sqrt(15/15) = 0.0
                 normalized_distance = distance_km / radius_limit
                 return max(0.2, 1.0 - math.sqrt(normalized_distance))
             else:
                 return 0.1
         
         def calculate_single_category_score(quest_category: str, preferred: str) -> float:
-            """단일 카테고리 매칭 점수 (0.0 ~ 1.0) - 영어 카테고리 기준"""
             if not preferred or not quest_category:
                 return 0.0
             
-            # 카테고리 정규화 (영어로)
             quest_cat_normalized = normalize_category(quest_category)
             preferred_cat_normalized = normalize_category(preferred)
             
             if not quest_cat_normalized or not preferred_cat_normalized:
                 return 0.0
             
-            # 정확히 일치
             if quest_cat_normalized.lower() == preferred_cat_normalized.lower():
                 return 1.0
             
-            # 유사 카테고리 그룹 (영어 기준)
             similar_groups = [
                 {"history", "historical"},
                 {"attractions", "landmark", "tourist"},
@@ -1136,57 +976,45 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                    preferred_cat_normalized.lower() in group:
                     return 0.7
             
-            return 0.3  # 관련 없음
+            return 0.3
         
         def calculate_category_score(quest_category: str, preferred_categories: List[str]) -> float:
-            """카테고리 매칭 점수 (0.0 ~ 1.0) - 다중 선택 지원"""
             if not preferred_categories or not quest_category:
-                return 0.5  # 선호도가 없으면 중간 점수
+                return 0.5
             
-            # 여러 테마 중 가장 높은 점수 반환
             max_score = 0.0
             for preferred in preferred_categories:
                 score = calculate_single_category_score(quest_category, preferred)
                 max_score = max(max_score, score)
             
-            # 매칭되는 것이 없으면 중간 점수 반환
             return max_score if max_score > 0 else 0.5
         
         def calculate_popularity_score(completion_count: int) -> float:
-            """인기도 점수 (0.0 ~ 1.0)"""
-            # completion_count를 0~1 범위로 정규화 (최대 1000 기준)
             return min(1.0, completion_count / 100.0)
         
         def calculate_diversity_score(quest_category: str, completed_categories: set) -> float:
-            """다양성 점수 (0.0 ~ 1.0, 완료한 카테고리와 다를수록 높음) - 영어 카테고리 기준"""
             if not completed_categories:
-                return 1.0  # 완료한 게 없으면 다양성 최고
+                return 1.0
             
-            # 카테고리 정규화
             quest_cat_normalized = normalize_category(quest_category)
             if not quest_cat_normalized:
                 return 0.5
             
             if quest_cat_normalized.lower() in {cat.lower() for cat in completed_categories}:
-                return 0.3  # 이미 완료한 카테고리면 낮은 점수
+                return 0.3
             else:
-                return 1.0  # 새로운 카테고리면 높은 점수
+                return 1.0
         
         def calculate_reward_score(reward_point: int) -> float:
-            """포인트 점수 (0.0 ~ 1.0)"""
-            # reward_point를 0~1 범위로 정규화 (최대 500 기준)
             return min(1.0, reward_point / 200.0)
         
-        # 각 퀘스트에 점수 부여
         scored_quests = []
         for quest in candidate_quests:
             quest_id = quest.get("id")
 
-            # 이미 완료한 퀘스트는 제외
             if quest_id in completed_quest_ids:
                 continue
 
-            # 필수 방문 장소는 제외 (나중에 별도로 추가)
             if must_visit_quest and quest_id == must_visit_quest.get("id"):
                 continue
 
@@ -1196,7 +1024,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             completion_count = quest.get("completion_count", 0)
             reward_point = quest.get("reward_point", 100)
             
-            # 각 점수 계산
             category_score = calculate_category_score(quest_category, preferred_categories)
             distance_score = calculate_distance_score(
                 request.latitude or 37.5665, 
@@ -1209,13 +1036,12 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             diversity_score = calculate_diversity_score(quest_category, completed_categories)
             reward_score = calculate_reward_score(reward_point)
             
-            # 가중치 적용하여 종합 점수 계산 (거리 가중치를 낮춰서 다양성 향상)
             weights = {
-                "category": 0.35,     # 카테고리 매칭 중요 (증가)
-                "distance": 0.15,     # 거리 중요 (감소: 25% -> 15%)
-                "diversity": 0.25,   # 다양성 중요 (증가: 20% -> 25%)
-                "popularity": 0.15,  # 인기도
-                "reward": 0.1         # 포인트
+                "category": 0.35,
+                "distance": 0.15,
+                "diversity": 0.25,
+                "popularity": 0.15,
+                "reward": 0.1
             }
             
             final_score = (
@@ -1237,13 +1063,10 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             
             scored_quests.append(quest)
         
-        # 5. 출발 지점 결정 (지정된 출발지점 또는 현재 GPS 위치)
         start_lat = request.start_latitude or request.latitude
         start_lon = request.start_longitude or request.longitude
         
-        # 6. 야경 특별 장소 찾기 (마지막 장소로 사용)
         def is_night_view_place(quest: dict) -> bool:
-            """야경 특별 장소인지 확인"""
             place = quest.get("places")
             if isinstance(place, list) and len(place) > 0:
                 place = place[0]
@@ -1251,32 +1074,26 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             if not isinstance(place, dict):
                 return False
             
-            # metadata에서 야경 관련 키워드 확인
             metadata = place.get("metadata", {})
             if isinstance(metadata, dict):
                 metadata_str = str(metadata).lower()
                 if any(keyword in metadata_str for keyword in ["night_view", "night_scene", "night_viewing", "야경", "야경명소"]):
                     return True
             
-            # description에서 야경 관련 키워드 확인
             description = (quest.get("description") or place.get("description") or "").lower()
             if any(keyword in description for keyword in ["night view", "night scene", "야경", "야경명소", "야경 포인트"]):
                 return True
             
-            # name에서 야경 관련 키워드 확인
             name = (quest.get("name") or place.get("name") or "").lower()
             if any(keyword in name for keyword in ["night view", "야경"]):
                 return True
             
             return False
         
-        # 야경 장소 분리
         night_view_quests = [q for q in scored_quests if is_night_view_place(q)]
         regular_quests = [q for q in scored_quests if not is_night_view_place(q)]
         
-        # 필수 방문 장소가 있으면 regular_quests에 포함 (출발 위치 기준 거리순 정렬에 포함되도록)
         if must_visit_quest:
-            # 필수 방문 장소가 이미 scored_quests에 있는지 확인
             must_visit_quest_id = must_visit_quest.get("id")
             must_visit_in_scored = False
             for quest in regular_quests:
@@ -1284,22 +1101,18 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                     must_visit_in_scored = True
                     break
             
-            # scored_quests에 없으면 추가
             if not must_visit_in_scored:
-                # 필수 방문 장소도 점수 계산 (다양성, 인기도 등은 최고 점수로 설정)
-                must_visit_quest["recommendation_score"] = 1.0  # 필수 방문 장소는 최우선
+                must_visit_quest["recommendation_score"] = 1.0
                 regular_quests.append(must_visit_quest)
         
-        # 7. 출발 지점 기준 거리 계산 및 정렬
         if start_lat and start_lon:
             def calculate_distance_from_start(quest: dict) -> float:
-                """출발 지점으로부터의 거리 계산"""
                 quest_lat = quest.get("latitude")
                 quest_lon = quest.get("longitude")
                 if not (quest_lat and quest_lon):
                     return float('inf')
                 
-                R = 6371  # 지구 반지름 (km)
+                R = 6371
                 lat1_rad = math.radians(start_lat)
                 lat2_rad = math.radians(float(quest_lat))
                 delta_lat = math.radians(float(quest_lat) - start_lat)
@@ -1311,54 +1124,44 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 c = 2 * math.asin(math.sqrt(a))
                 return R * c
             
-            # 일반 퀘스트를 출발 지점 기준 거리순으로 정렬 (필수 방문 장소 포함)
-            # 점수도 함께 고려하여 정렬 (거리와 점수의 균형)
             for quest in regular_quests:
                 quest["distance_from_start"] = calculate_distance_from_start(quest)
-            # 거리와 점수를 모두 고려한 정렬 (거리 가중치를 낮춰서 점수가 높은 먼 곳도 선택 가능)
             regular_quests.sort(key=lambda x: (
-                x.get("distance_from_start", float('inf')) * 0.3 +  # 거리 가중치 낮춤
-                (1.0 - x.get("recommendation_score", 0)) * 0.7     # 점수 가중치 높임
+                x.get("distance_from_start", float('inf')) * 0.3 +
+                (1.0 - x.get("recommendation_score", 0)) * 0.7
             ))
             
-            # 야경 장소도 거리순 정렬
             for quest in night_view_quests:
                 quest["distance_from_start"] = calculate_distance_from_start(quest)
             night_view_quests.sort(key=lambda x: (x.get("distance_from_start", float('inf')), -x.get("recommendation_score", 0)))
         else:
-            # GPS 정보가 없으면 점수순 정렬
             regular_quests.sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
             night_view_quests.sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
         
-        # 8. AI 기반 추천 또는 점수 기반 추천
         use_ai_recommendation = os.getenv("USE_AI_ROUTE_RECOMMENDATION", "true").lower() == "true"
         
         if use_ai_recommendation and len(scored_quests) >= 4:
-            # AI 기반 추천 시도
             from services.ai import generate_route_recommendation
             
             ai_recommended = generate_route_recommendation(
-                candidate_quests=scored_quests[:20],  # 상위 20개 후보
+                candidate_quests=scored_quests[:20],
                 preferences=request.preferences,
                 completed_quest_ids=completed_quest_ids,
                 language="en"
             )
             
             if ai_recommended and len(ai_recommended) >= 4:
-                # AI 추천 결과에 place 정보가 없을 수 있으므로 DB에서 가져오기
                 ai_quests_with_place = []
                 for quest in ai_recommended[:4]:
                     quest_id = quest.get("id")
                     place_id = quest.get("place_id")
                     
-                    # DB에서 quest와 place 정보를 함께 가져오기
                     quest_with_place = None
                     for scored_quest in scored_quests:
                         if scored_quest.get("id") == quest_id:
                             quest_with_place = scored_quest
                             break
                     
-                    # 찾지 못했으면 DB에서 직접 조회
                     if not quest_with_place:
                         quest_result = db.table("quests").select("*, places(*)").eq("id", quest_id).single().execute()
                         if quest_result.data:
@@ -1375,24 +1178,19 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 
                 recommended_quests = ai_quests_with_place[:4]
                 
-                # 필수 방문 장소가 있으면 포함하고, 야경 장소를 마지막에 배치
                 final_quests = []
                 night_quest_in_list = None
                 must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
                 
-                # AI 추천 결과에서 야경 장소와 일반 장소 분리
                 for quest in recommended_quests:
                     if is_night_view_place(quest):
                         night_quest_in_list = quest
                     else:
                         final_quests.append(quest)
                 
-                # 필수 방문 장소가 AI 추천에 포함되지 않았으면 추가
                 if must_visit_quest_id and not any(q.get("id") == must_visit_quest_id for q in final_quests):
-                    # 출발 위치 기준 거리순 정렬된 regular_quests에서 필수 방문 장소 찾기
                     for quest in regular_quests:
                         if quest.get("id") == must_visit_quest_id:
-                            # 필수 방문 장소를 적절한 위치에 삽입 (거리순 유지)
                             inserted = False
                             for i, q in enumerate(final_quests):
                                 if q.get("distance_from_start", float('inf')) > quest.get("distance_from_start", float('inf')):
@@ -1403,13 +1201,10 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                                 final_quests.append(quest)
                             break
                 
-                # 야경 장소가 있으면 마지막에 추가, 없으면 일반 장소로 채우기
                 if night_quest_in_list:
-                    # 야경 장소를 마지막에 추가 (4개가 안 찼을 때만)
                     if len(final_quests) < 4:
                         final_quests.append(night_quest_in_list)
                 else:
-                    # 야경 장소가 없으면 일반 장소로 채우기
                     for quest in regular_quests:
                         if len(final_quests) >= 4:
                             break
@@ -1418,7 +1213,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                             continue
                         final_quests.append(quest)
                 
-                # 야경 장소가 없고 아직 4개가 안 찼으면 일반 장소로 채우기
                 if len(final_quests) < 4:
                     for quest in regular_quests:
                         if len(final_quests) >= 4:
@@ -1431,19 +1225,15 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 recommended_quests = final_quests[:4]
                 logger.info("Using AI-based recommendation")
             else:
-                # AI 추천 실패 시 점수 기반으로 폴백 (거리 분산 고려)
                 recommended_quests = []
                 must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
-                remaining_count = 3  # 일반 3개 + 야경 1개 = 4개 (필수 방문 장소는 regular_quests에 포함됨)
+                remaining_count = 3
                 
-                # 거리 구간별로 균등하게 선택하여 다양성 확보
-                # 반경을 3개 구간으로 나눔: 가까운 곳(0-33%), 중간(33-66%), 먼 곳(66-100%)
                 if start_lat and start_lon and len(regular_quests) > remaining_count:
-                    # 거리 구간별로 퀘스트 분류
                     distance_zones = {
-                        "near": [],      # 0-33% 구간
-                        "mid": [],       # 33-66% 구간
-                        "far": []        # 66-100% 구간
+                        "near": [],
+                        "mid": [],
+                        "far": []
                     }
                     
                     for quest in regular_quests:
@@ -1451,7 +1241,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                         if dist == float('inf'):
                             continue
                         
-                        # 반경의 비율로 구간 결정
                         zone_ratio = dist / search_radius if search_radius > 0 else 0
                         if zone_ratio <= 0.33:
                             distance_zones["near"].append(quest)
@@ -1460,7 +1249,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                         else:
                             distance_zones["far"].append(quest)
                     
-                    # 각 구간에서 균등하게 선택 (점수순으로 정렬된 상태에서)
                     zones_order = ["near", "mid", "far"]
                     zone_idx = 0
                     
@@ -1478,11 +1266,9 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                                 recommended_quests.append(quest)
                         
                         zone_idx += 1
-                        # 모든 구간을 한 번씩 확인했는데도 부족하면 일반 방식으로
                         if zone_idx >= len(zones_order) * 2:
                             break
                     
-                    # 아직 부족하면 일반 방식으로 채우기
                     if len(recommended_quests) < remaining_count:
                         for quest in regular_quests:
                             if len(recommended_quests) >= remaining_count:
@@ -1492,7 +1278,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                                 continue
                             recommended_quests.append(quest)
                 else:
-                    # 위치 정보가 없으면 일반 방식으로 선택
                     for quest in regular_quests[:remaining_count * 2]:
                         if len(recommended_quests) >= remaining_count:
                             break
@@ -1501,7 +1286,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                             continue
                         recommended_quests.append(quest)
                 
-                # 마지막 장소는 항상 야경 특별 장소로 (가능한 경우)
                 if night_view_quests and len(recommended_quests) < 4:
                     for night_quest in night_view_quests:
                         if len(recommended_quests) >= 4:
@@ -1510,9 +1294,8 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                         if any(rq.get("place_id") == place_id for rq in recommended_quests):
                             continue
                         recommended_quests.append(night_quest)
-                        break  # 야경 장소는 1개만 추가
+                        break
                 
-                # 야경 장소가 없으면 일반 퀘스트로 채우기
                 if len(recommended_quests) < 4:
                     for quest in regular_quests:
                         if len(recommended_quests) >= 4:
@@ -1525,18 +1308,15 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 recommended_quests = recommended_quests[:4]
                 logger.info("Using score-based recommendation (AI fallback)")
         else:
-            # 점수 기반 추천 (거리 분산 고려)
             recommended_quests = []
             must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
-            remaining_count = 3  # 일반 3개 + 야경 1개 = 4개 (필수 방문 장소는 regular_quests에 포함됨)
+            remaining_count = 3
             
-            # 거리 구간별로 균등하게 선택하여 다양성 확보
             if start_lat and start_lon and len(regular_quests) > remaining_count:
-                # 거리 구간별로 퀘스트 분류
                 distance_zones = {
-                    "near": [],      # 0-33% 구간
-                    "mid": [],       # 33-66% 구간
-                    "far": []        # 66-100% 구간
+                    "near": [],
+                    "mid": [],
+                    "far": []
                 }
                 
                 for quest in regular_quests:
@@ -1544,7 +1324,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                     if dist == float('inf'):
                         continue
                     
-                    # 반경의 비율로 구간 결정
                     zone_ratio = dist / search_radius if search_radius > 0 else 0
                     if zone_ratio <= 0.33:
                         distance_zones["near"].append(quest)
@@ -1553,7 +1332,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                     else:
                         distance_zones["far"].append(quest)
                 
-                # 각 구간에서 균등하게 선택 (점수순으로 정렬된 상태에서)
                 zones_order = ["near", "mid", "far"]
                 zone_idx = 0
                 
@@ -1571,11 +1349,9 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                             recommended_quests.append(quest)
                     
                     zone_idx += 1
-                    # 모든 구간을 한 번씩 확인했는데도 부족하면 일반 방식으로
                     if zone_idx >= len(zones_order) * 2:
                         break
                 
-                # 아직 부족하면 일반 방식으로 채우기
                 if len(recommended_quests) < remaining_count:
                     for quest in regular_quests:
                         if len(recommended_quests) >= remaining_count:
@@ -1585,7 +1361,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                             continue
                         recommended_quests.append(quest)
             else:
-                # 위치 정보가 없으면 일반 방식으로 선택
                 for quest in regular_quests[:remaining_count * 2]:
                     if len(recommended_quests) >= remaining_count:
                         break
@@ -1594,7 +1369,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                         continue
                     recommended_quests.append(quest)
             
-            # 마지막 장소는 항상 야경 특별 장소로 (가능한 경우)
             if night_view_quests and len(recommended_quests) < 4:
                 for night_quest in night_view_quests:
                     if len(recommended_quests) >= 4:
@@ -1603,9 +1377,8 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                     if any(rq.get("place_id") == place_id for rq in recommended_quests):
                         continue
                     recommended_quests.append(night_quest)
-                    break  # 야경 장소는 1개만 추가
+                    break
             
-            # 야경 장소가 없으면 일반 퀘스트로 채우기
             if len(recommended_quests) < 4:
                 for quest in regular_quests:
                     if len(recommended_quests) >= 4:
@@ -1618,13 +1391,10 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             recommended_quests = recommended_quests[:4]
             logger.info("Using score-based recommendation")
         
-        # 세션 ID 생성
         session_id = str(uuid.uuid4())
         
-        # 테마 추출 (preferences에서) - 세션 제목용
         theme = request.preferences.get("theme") or request.preferences.get("category") or "Seoul Travel"
         if isinstance(theme, list):
-            # 리스트인 경우: 첫 번째 테마를 제목으로 사용
             if len(theme) > 0:
                 if isinstance(theme[0], dict):
                     theme = theme[0].get("name", "Seoul Travel")
@@ -1639,9 +1409,7 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         else:
             theme = "Seoul Travel"
         
-        # Save chat log (travel itinerary - read-only)
         try:
-            # quest IDs를 추출하여 저장
             quest_ids = [q.get("id") for q in recommended_quests]
 
             db.table("chat_logs").insert({
@@ -1651,11 +1419,9 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 "mode": "explore",
                 "function_type": "route_recommend",
                 "chat_session_id": session_id,
-                "title": theme,  # ex: Events, Food, Culture etc.
-                "is_read_only": True,  # Read-only
-
-                # New fields
-                "quest_step": 99,  # Final result step
+                "title": theme,
+                "is_read_only": True,
+                "quest_step": 99,
                 "prompt_step_text": "AI-recommended travel course results!",
                 "options": {"quest_ids": quest_ids},
                 "selected_theme": theme,
@@ -1666,7 +1432,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         except Exception as db_error:
             logger.warning(f"Failed to save chat log: {db_error}")
         
-        # 위치 정보 수집 (경로 추천 관심도)
         if recommended_quests:
             from services.location_tracking import log_route_recommendation
             quest_ids = [q.get("id") for q in recommended_quests if q.get("id")]
@@ -1682,7 +1447,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         
         logger.info(f"Recommended {len(recommended_quests)} quests")
         
-        # 각 추천 퀘스트에 야경 장소 여부 추가
         for quest in recommended_quests:
             quest["is_night_view"] = is_night_view_place(quest)
         

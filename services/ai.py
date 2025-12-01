@@ -1,4 +1,4 @@
-"""AI Service - Google Gemini"""
+"""AI Service"""
 
 import google.generativeai as genai
 import os
@@ -22,9 +22,7 @@ def generate_docent_message(
     landmark: str,
     user_message: Optional[str] = None,
     language: str = "en"
-) -> str:
-    """Generate AI docent response"""
-    
+) -> str:    
     base_prompt = f"""You are a friendly AI docent for '{landmark}'.
 
 {f'Question: {user_message}' if user_message else 'Please introduce this place.'}
@@ -39,9 +37,7 @@ Provide an engaging response in 3-4 sentences."""
         return "Cannot generate response."
 
 
-def generate_quiz(landmark: str, language: str = "en") -> dict:
-    """Generate quiz about landmark"""
-    
+def generate_quiz(landmark: str, language: str = "en") -> dict:    
     prompt = f"""Create a quiz about {landmark}.
 
 Return in JSON format:
@@ -75,22 +71,9 @@ def generate_quest_quizzes(
     place_name: str,
     place_description: Optional[str] = None,
     place_category: Optional[str] = None,
-    language: str = "ko",
+    language: str = "en",
     count: int = 5
 ) -> List[Dict]:
-    """
-    Generate multiple quizzes (default 5) for a quest place
-    
-    Args:
-        place_name: 장소 이름
-        place_description: 장소 설명 (선택)
-        place_category: 장소 카테고리 (선택)
-        language: 언어 (기본값: "ko")
-        count: 생성할 퀴즈 개수 (기본값: 5)
-    
-    Returns:
-        퀴즈 리스트 (각 퀴즈는 question, options, correct_answer, hint, explanation, difficulty 포함)
-    """
     if not GEMINI_AVAILABLE:
         logger.warning("Gemini not available, cannot generate quizzes")
         return []
@@ -126,7 +109,6 @@ Return in JSON format:
         response = model.generate_content(prompt)
         text = response.text.strip()
         
-        # Extract JSON
         if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -135,9 +117,8 @@ Return in JSON format:
         result = json.loads(text.strip())
         quizzes = result.get("quizzes", [])
         
-        # Validate and normalize quizzes
         validated_quizzes = []
-        for quiz in quizzes[:count]:  # Limit to requested count
+        for quiz in quizzes[:count]:
             if not isinstance(quiz.get("options"), list) or len(quiz.get("options", [])) != 4:
                 continue
             if quiz.get("correct_answer") not in [0, 1, 2, 3]:
@@ -166,15 +147,13 @@ def generate_route_recommendation(
     completed_quest_ids: set,
     language: str = "en"
 ) -> list:
-    """AI-based travel itinerary recommendation"""
     if not GEMINI_AVAILABLE:
         logger.warning("Gemini not available, using fallback")
         return []
     
     try:
-        # Organize candidate quest information
         quest_info_list = []
-        for quest in candidate_quests[:20]:  # Only top 20 passed to AI
+        for quest in candidate_quests[:20]:
             quest_info = {
                 "id": quest.get("id"),
                 "name": quest.get("name", ""),
@@ -188,11 +167,8 @@ def generate_route_recommendation(
             }
             quest_info_list.append(quest_info)
         
-        # Organize preference information
-        # theme 처리 (다중 선택 지원)
         theme = preferences.get("theme") or preferences.get("category") or "Seoul Travel"
         if isinstance(theme, list):
-            # 리스트인 경우: ["Culture", "History", "Food"] 등
             theme_list = []
             for t in theme:
                 if isinstance(t, dict):
@@ -240,7 +216,6 @@ Return in JSON format:
         response = model.generate_content(prompt)
         text = response.text.strip()
         
-        # Extract JSON
         if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -249,7 +224,6 @@ Return in JSON format:
         result = json.loads(text.strip())
         selected_ids = result.get("selected_quest_ids", [])
         
-        # Return selected quests
         selected_quests = []
         quest_dict = {q.get("id"): q for q in candidate_quests}
         
