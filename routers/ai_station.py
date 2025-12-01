@@ -63,6 +63,7 @@ class RouteRecommendRequest(BaseModel):
     longitude: Optional[float] = None
     start_latitude: Optional[float] = None  # 출발 지점 위도 (지정 시 사용)
     start_longitude: Optional[float] = None  # 출발 지점 경도 (지정 시 사용)
+    radius_km: Optional[float] = 15.0  # 검색 반경 (km) - anywhere 클릭 시 사용자가 설정 가능
 
 
 def format_time_ago(created_at_str: str) -> str:
@@ -1039,12 +1040,15 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                             completed_categories.add(normalized)
         
         # 3. 퀘스트 후보 조회
+        # 사용자가 설정한 거리 또는 기본값 15km 사용
+        search_radius = request.radius_km if request.radius_km is not None else 15.0
+        
         if request.latitude and request.longitude:
             from routers.recommend import get_nearby_quests_route
             nearby_result = await get_nearby_quests_route(
                 latitude=request.latitude,
                 longitude=request.longitude,
-                radius_km=15.0,  # 더 넓은 범위에서 후보 수집
+                radius_km=search_radius,  # 사용자가 설정한 거리 사용
                 limit=50
             )
             candidate_quests = nearby_result.get("quests", [])
@@ -1063,10 +1067,13 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 candidate_quests.append(quest)
         
         # 4. 각 퀘스트에 대해 점수 계산
-        def calculate_distance_score(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        def calculate_distance_score(lat1: float, lon1: float, lat2: float, lon2: float, max_radius: float = None) -> float:
             """거리 기반 점수 (0.0 ~ 1.0, 가까울수록 높음)"""
             if not (lat1 and lon1 and lat2 and lon2):
                 return 0.5  # 위치 정보가 없으면 중간 점수
+            
+            # 사용자가 설정한 거리 또는 기본값 15km 사용
+            radius_limit = max_radius if max_radius is not None else search_radius
             
             R = 6371  # 지구 반지름 (km)
             lat1_rad = math.radians(lat1)
@@ -1080,9 +1087,9 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             c = 2 * math.asin(math.sqrt(a))
             distance_km = R * c
             
-            # 15km 이내면 거리 점수 적용, 그 외는 0.1
-            if distance_km <= 15.0:
-                return max(0.1, 1.0 - (distance_km / 15.0))
+            # 설정한 거리 이내면 거리 점수 적용, 그 외는 0.1
+            if distance_km <= radius_limit:
+                return max(0.1, 1.0 - (distance_km / radius_limit))
             else:
                 return 0.1
         
@@ -1182,7 +1189,8 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 request.latitude or 37.5665, 
                 request.longitude or 126.9780,
                 float(quest_lat) if quest_lat else None,
-                float(quest_lon) if quest_lon else None
+                float(quest_lon) if quest_lon else None,
+                max_radius=search_radius
             ) if request.latitude and request.longitude else 0.5
             popularity_score = calculate_popularity_score(completion_count)
             diversity_score = calculate_diversity_score(quest_category, completed_categories)
@@ -1544,6 +1552,10 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 )
         
         logger.info(f"Recommended {len(recommended_quests)} quests")
+        
+        # 각 추천 퀘스트에 야경 장소 여부 추가
+        for quest in recommended_quests:
+            quest["is_night_view"] = is_night_view_place(quest)
         
         return {
             "success": True,

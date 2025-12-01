@@ -2334,7 +2334,8 @@ STT + TTS 통합 엔드포인트
   "latitude": 37.5665,                        // 선택적: 현재 GPS 위도
   "longitude": 126.9780,                       // 선택적: 현재 GPS 경도
   "start_latitude": 37.5665,                  // 선택적: 출발 지점 위도 (서울역, 강남역 등)
-  "start_longitude": 126.9780                 // 선택적: 출발 지점 경도
+  "start_longitude": 126.9780,                // 선택적: 출발 지점 경도
+  "radius_km": 15.0                           // 선택적: 검색 반경 (km) - anywhere 클릭 시 사용자가 설정 가능 (기본: 15.0)
 }
 ```
 
