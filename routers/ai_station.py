@@ -250,7 +250,7 @@ async def get_chat_session(session_id: str, user_id: str = Depends(get_current_u
     try:
         db = get_db()
         
-        result = db.table("chat_logs").select("*").eq("chat_session_id", session_id).eq("user_id", user_id).order("created_at", asc=True).execute()
+        result = db.table("chat_logs").select("*").eq("chat_session_id", session_id).eq("user_id", user_id).order("created_at", desc=False).execute()
         
         if not result.data:
             raise HTTPException(status_code=404, detail="Session not found")
