@@ -63,7 +63,7 @@ class RouteRecommendRequest(BaseModel):
     longitude: Optional[float] = None
     start_latitude: Optional[float] = None  # 출발 지점 위도 (지정 시 사용)
     start_longitude: Optional[float] = None  # 출발 지점 경도 (지정 시 사용)
-    radius_km: Optional[float] = 15.0  # 검색 반경 (km) - anywhere 클릭 시 사용자가 설정 가능
+    radius_km: Optional[float] = None  # 검색 반경 (km) - anywhere 클릭 시 사용자가 설정 가능 (기본값: 15.0)
 
 
 def format_time_ago(created_at_str: str) -> str:
@@ -909,7 +909,7 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
     Understand user preferences through preliminary questions and recommend 4 quests
     """
     try:
-        logger.info(f"Route recommend: {user_id}")
+        logger.info(f"Route recommend: {user_id}, radius_km={request.radius_km}")
         
         db = get_db()
         
@@ -1041,7 +1041,13 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         
         # 3. 퀘스트 후보 조회
         # 사용자가 설정한 거리 또는 기본값 15km 사용
-        search_radius = request.radius_km if request.radius_km is not None else 15.0
+        # Pydantic 기본값 때문에 request.radius_km가 None이 아닐 수 있으므로 명시적으로 확인
+        if request.radius_km is not None:
+            search_radius = float(request.radius_km)
+        else:
+            search_radius = 15.0
+        
+        logger.info(f"Using search_radius: {search_radius}km (request.radius_km={request.radius_km})")
         
         if request.latitude and request.longitude:
             from routers.recommend import get_nearby_quests_route

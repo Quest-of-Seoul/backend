@@ -297,6 +297,7 @@ async def get_nearby_quests_route(
 ):
     """Get nearby quests based on GPS"""
     try:
+        logger.info(f"get_nearby_quests_route called with radius_km={radius_km}")
         db = get_db()
         
         # 퀘스트와 Place 정보를 함께 조회
@@ -316,6 +317,7 @@ async def get_nearby_quests_route(
                 float(quest["latitude"]), float(quest["longitude"])
             )
             
+            # radius_km 이내의 퀘스트만 포함
             if distance <= radius_km:
                 formatted_quest = format_quest_response_with_place(
                     quest=quest,
@@ -331,7 +333,7 @@ async def get_nearby_quests_route(
         # Limit 적용
         nearby_quests = nearby_quests[:limit]
         
-        logger.info(f"Found {len(nearby_quests)} nearby quests")
+        logger.info(f"Found {len(nearby_quests)} nearby quests within {radius_km}km radius")
         
         return {
             "success": True,
