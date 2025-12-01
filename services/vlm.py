@@ -130,28 +130,14 @@ Features: [visual characteristics and special points]
 Confidence: [high/medium/low]"""
     
     if quest_context:
-        quest_name = quest_context.get("name") or quest_context.get("title", "")
-        quest_description = quest_context.get("description", "")
-        quest_category = quest_context.get("category", "")
-        place_info = quest_context.get("place", {})
+        from services.quest_rag import generate_quest_rag_text
         
-        quest_info = []
-        if quest_name:
-            quest_info.append(f"Quest Place: {quest_name}")
-        if quest_category:
-            quest_info.append(f"Category: {quest_category}")
-        if quest_description:
-            quest_info.append(f"Description: {quest_description[:200]}...")
-        if place_info:
-            if place_info.get("address"):
-                quest_info.append(f"Address: {place_info['address']}")
-            if place_info.get("district"):
-                quest_info.append(f"District: {place_info['district']}")
+        quest_place = quest_context.get("place", {})
+        quest_rag_text = generate_quest_rag_text(quest_context, quest_place)
         
-        if quest_info:
-            prompt += "\n\n[Quest Information]\n"
-            prompt += "\n".join(quest_info)
-            prompt += "\n\nPlease verify if the image matches this quest place."
+        prompt += "\n\n[Quest Information - Use this data to analyze the image]\n"
+        prompt += quest_rag_text
+        prompt += "\n\nIMPORTANT: Analyze the image based on the above quest information. Verify if the image matches this quest place and provide detailed analysis using the quest data."
     
     if nearby_places:
         places_text = "\n".join([

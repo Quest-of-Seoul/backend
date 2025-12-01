@@ -646,35 +646,64 @@ async def quest_vlm_chat(request: QuestVLMChatRequest, user_id: str = Depends(ge
             if matched_place:
                 logger.info(f"Using quest's actual place (no VLM match): {matched_place.get('name')}")
         
-        final_description = vlm_response
-        if matched_place:
-            from services.ai import generate_docent_message
-            enhancement_prompt = f"""
-VLM Analysis Result:
+        from services.ai import generate_docent_message
+        from services.quest_rag import generate_quest_rag_text
+        
+        quest_place = quest.get("place") or {}
+        quest_rag_text = generate_quest_rag_text(quest, quest_place)
+        
+        landmark = quest.get("name") or quest.get("title") or (quest_place.get("name") if quest_place else "Quest Place")
+        
+        if request.user_message:
+            user_prompt = f"""The following is comprehensive information about the quest place the user is currently working on (from database):
+
+{quest_rag_text}
+
+VLM Image Analysis Result:
 {vlm_response}
 
-Place Information:
-- Name: {matched_place.get('name')}
-- Category: {matched_place.get('category')}
-- Description: {matched_place.get('description')}
+User Question: {request.user_message}
 
-Based on the above information, please introduce this place in a friendly and engaging way in 3-4 sentences, like an AR docent.
-"""
-            try:
-                final_description = generate_docent_message(
-                    landmark=matched_place.get('name', 'This place'),
-                    user_message=enhancement_prompt,
-                    language="en"
-                )
-            except Exception as e:
-                logger.warning(f"Description enhancement failed: {e}")
+IMPORTANT: You MUST answer the user's question based ONLY on the quest database information provided above. Use the quest data (name, description, category, place details, quiz topics) to provide accurate and detailed answers. Do not use general knowledge - only use the quest database data."""
+        else:
+            user_prompt = f"""The following is comprehensive information about the quest place the user is currently working on (from database):
+
+{quest_rag_text}
+
+VLM Image Analysis Result:
+{vlm_response}
+
+IMPORTANT: Based ONLY on the quest database information and VLM analysis above, introduce this place in a friendly and engaging way in 3-4 sentences, like an AR docent. Use the quest database data (name, description, category, place details, quiz topics) to provide accurate and detailed information. Do not use general knowledge - only use the quest database data."""
+        
+        try:
+            import services.ai as ai_service
+            
+            if not ai_service.OPENAI_AVAILABLE or not ai_service.openai_client:
+                raise Exception("OpenAI not available")
+            
+            system_message = f"""You are a friendly AI docent for '{landmark}'. 
+You MUST answer questions based ONLY on the quest database information provided by the user. 
+Do not use general knowledge - only use the specific quest data from the database."""
+            
+            response = ai_service.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=500
+            )
+            final_description = response.choices[0].message.content
+        except Exception as e:
+            logger.warning(f"Description generation failed: {e}")
+            quest_context = build_quest_context_block(quest)
+            final_description = f"""{vlm_response}
+
+Quest Information:
+{quest_context}"""
         
         ai_response = final_description
-        quest_context = build_quest_context_block(quest)
-        ai_response = f"""{ai_response}
-
-Current Quest Reference Information:
-{quest_context}"""
         
         audio_url = None
         audio_base64 = None
