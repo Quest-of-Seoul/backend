@@ -144,6 +144,11 @@ JWT Bearer 토큰 기반 인증을 사용합니다.
 }
 ```
 
+**Status Codes:**
+- 201: 성공 (Created)
+- 400: 이메일이 이미 등록됨
+- 500: 서버 오류
+
 ---
 
 ### POST /auth/login
@@ -171,6 +176,11 @@ JWT Bearer 토큰 기반 인증을 사용합니다.
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+- 401: 잘못된 이메일 또는 비밀번호
+- 500: 서버 오류
+
 ---
 
 ### GET /auth/me
@@ -190,6 +200,12 @@ JWT Bearer 토큰 기반 인증을 사용합니다.
   "joined_at": "2024-01-01T12:00:00Z"
 }
 ```
+
+**Status Codes:**
+- 200: 성공
+- 401: 잘못된 또는 만료된 토큰
+- 404: 사용자를 찾을 수 없음
+- 500: 서버 오류
 
 ---
 
@@ -211,6 +227,12 @@ JWT Bearer 토큰 기반 인증을 사용합니다.
   "nickname": "사용자"
 }
 ```
+
+**Status Codes:**
+- 200: 성공
+- 401: 잘못된 또는 만료된 토큰
+- 404: 사용자를 찾을 수 없음
+- 500: 서버 오류
 
 ---
 
@@ -288,6 +310,10 @@ AI 도슨트와 대화
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
+
 ---
 
 ### POST /docent/tts
@@ -335,6 +361,10 @@ AI 도슨트와 대화
 - `prefer_url=false`일 때는 `audio`만 반환됩니다
 - `prefer_url=true`일 때는 `audio_url`과 `audio` 모두 반환됩니다
 
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
+
 ---
 
 ### GET /docent/history
@@ -366,6 +396,11 @@ AI 도슨트와 대화
   ]
 }
 ```
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
 
 ---
 
@@ -405,9 +440,22 @@ TTS 스트리밍
 ```
 
 **Receive:**
-1. JSON message with text
+1. JSON message with text:
+   ```json
+   {
+     "type": "text",
+     "message": "근정전은 경복궁의 정전으로...",
+     "landmark": "경복궁"
+   }
+   ```
 2. Binary audio chunks (if TTS enabled)
 3. "DONE" message
+
+**Notes:**
+- WebSocket 연결 후 JSON 메시지를 전송합니다
+- TTS가 활성화되어 있으면 텍스트 응답 후 오디오 청크를 스트리밍합니다
+- 모든 전송이 완료되면 "DONE" 메시지를 받습니다
+- 에러 발생 시 JSON 형식의 에러 메시지를 받습니다
 
 ---
 
@@ -416,6 +464,8 @@ TTS 스트리밍
 ### GET /quest/list
 
 모든 퀘스트 조회
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Response:**
 
@@ -451,11 +501,17 @@ TTS 스트리밍
 - `address`, `place_image_url`, `place_images`는 place 정보에서 가져옵니다
 - place 정보가 없으면 해당 필드들이 포함되지 않을 수 있습니다
 
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
+
 ---
 
 ### POST /quest/nearby
 
 주변 퀘스트 검색
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Request Body:**
 
@@ -496,11 +552,15 @@ TTS 스트리밍
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
+
 ---
 
 ### POST /quest/start
 
-사용자가 특정 장소 1km 이내에서 퀘스트를 시작(또는 재개)할 때 호출합니다. `user_quests`와 `user_quest_progress`가 동시에 초기화되고, 이후 퀘스트 챗/퀴즈 API에서 재사용할 `quest_id`와 `place_id`를 돌려줍니다.
+사용자가 퀘스트를 시작(또는 재개)할 때 호출합니다. `user_quests`와 `user_quest_progress`가 동시에 초기화되고, 이후 퀘스트 챗/퀴즈 API에서 재사용할 `quest_id`와 `place_id`를 돌려줍니다.
 
 **Headers:**
 - `Authorization: Bearer <token>` (필수)
@@ -556,6 +616,13 @@ TTS 스트리밍
 **Notes:**
 - 최초 호출 시 `user_quests` 레코드를 생성하고, 이후에는 기존 상태(예: completed)를 그대로 반환합니다.
 - 모든 FK 제약을 맞추기 위해 사용자 레코드가 없으면 자동으로 guest 사용자로 생성됩니다.
+- `message`는 최초 호출 시 "Quest started", 기존 레코드가 있을 경우 "Quest resumed"로 반환됩니다.
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 404: 퀘스트를 찾을 수 없음
+- 500: 서버 오류
 
 ---
 
@@ -614,6 +681,11 @@ TTS 스트리밍
 - `completed` 상태에서 다시 `completed`를 호출하면 "Quest already completed" 메시지가 반환되고 추가 포인트가 적립되지 않습니다.
 - 퀘스트 포인트는 퀴즈 정답 제출 (`/quest/{quest_id}/quizzes/{quiz_id}/submit`)과 `update_quest_progress` 중 하나만 사용하세요.
 
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
+
 ---
 
 ### GET /quest/user
@@ -650,11 +722,18 @@ TTS 스트리밍
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
+
 ---
 
 ### GET /quest/{quest_id}
 
 퀘스트 상세 정보
+
+**Note:** 인증은 선택적입니다. 토큰이 없어도 퀘스트 정보는 조회 가능합니다.
 
 **Path Parameters:**
 
@@ -692,12 +771,20 @@ TTS 스트리밍
 - `Authorization` 헤더에 Bearer 토큰을 포함하면 해당 유저의 진행 상태(`user_status`)와 현재 포인트(`user_points`)가 포함됩니다.
 - 인증 토큰이 없으면 `quest` 필드만 반환됩니다.
 - 인증은 선택적이며, 토큰이 없어도 퀘스트 정보는 조회 가능합니다.
+- `user_status`는 해당 퀘스트를 시작한 적이 없으면 `null`일 수 있습니다.
+
+**Status Codes:**
+- 200: 성공
+- 404: 퀘스트를 찾을 수 없음
+- 500: 서버 오류
 
 ---
 
 ### GET /quest/{quest_id}/quizzes
 
 퀘스트 시작 이후 place_id에 연동된 퀴즈 세트를 조회합니다.
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Response:**
 
@@ -725,6 +812,11 @@ TTS 스트리밍
 **Notes:**
 - 퀴즈가 없으면 AI로 자동 생성하여 데이터베이스에 저장한 후 반환합니다
 - 생성된 퀴즈는 이후 요청에서 재사용됩니다
+
+**Status Codes:**
+- 200: 성공
+- 404: 퀘스트를 찾을 수 없음
+- 500: 서버 오류
 
 ---
 
@@ -830,6 +922,12 @@ TTS 스트리밍
 - 동일 퀘스트에 대해 이미 `completed` 상태라면 `points_awarded`는 0이고 `already_completed`가 true로 반환됩니다
 - 모든 시도 횟수는 `user_quest_progress.quiz_attempts`에 누적됩니다
 
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 404: 퀴즈를 찾을 수 없음
+- 500: 서버 오류
+
 ---
 
 ## Reward Endpoints
@@ -857,6 +955,11 @@ TTS 스트리밍
   ]
 }
 ```
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
 
 ---
 
@@ -896,11 +999,19 @@ TTS 스트리밍
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 400: 포인트가 0 이하
+- 500: 서버 오류
+
 ---
 
 ### GET /reward/list
 
 사용 가능한 리워드 목록
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Query Parameters:**
 
@@ -926,6 +1037,10 @@ TTS 스트리밍
   ]
 }
 ```
+
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
 
 ---
 
@@ -974,6 +1089,15 @@ TTS 스트리밍
 }
 ```
 
+**Status Codes:**
+- 200: 성공 (포인트 부족 시에도 200 반환, `status: "fail"` 포함)
+- 404: 리워드를 찾을 수 없음 또는 비활성화됨
+- 401: 인증 실패
+- 500: 서버 오류
+
+**Notes:**
+- 포인트가 부족한 경우에도 HTTP 상태 코드는 200이며, 응답 본문의 `status` 필드가 `"fail"`로 반환됩니다
+
 ---
 
 ### GET /reward/claimed
@@ -1003,6 +1127,11 @@ TTS 스트리밍
   ]
 }
 ```
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
 
 ---
 
@@ -1121,7 +1250,8 @@ TTS 스트리밍
 **Notes:**
 - `use_cache=true`이고 캐시된 결과가 있으면 `cached: true` 필드가 포함되고 응답 형식이 다릅니다
 - `similar_places`는 벡터 검색 결과로, 각 항목은 `place` 객체와 `similarity` 값을 포함합니다
-- `prefer_url=true`일 때만 `audio_url`이 포함되고, `enable_tts=true`일 때만 `audio` 또는 `audio_url`이 포함됩니다
+- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다
+- `enable_tts=true`일 때만 `audio` 또는 `audio_url`이 포함됩니다
 
 **Status Codes:**
 - 200: 성공
@@ -1145,7 +1275,7 @@ TTS 스트리밍
 | image | file | 필수 | 이미지 파일 |
 | latitude | float | 선택 | 위도 |
 | longitude | float | 선택 | 경도 |
-| language | string | 선택 | 언어 (기본: ko) |
+| language | string | 선택 | 언어 (기본: en) |
 | prefer_url | boolean | 선택 | 오디오 URL 선호 |
 | enable_tts | boolean | 선택 | TTS 활성화 |
 
@@ -1156,6 +1286,8 @@ TTS 스트리밍
 ### POST /vlm/similar
 
 유사 이미지 검색
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Request Body:**
 
@@ -1196,11 +1328,19 @@ TTS 스트리밍
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+- 400: 잘못된 이미지 형식
+- 503: 임베딩 서비스 사용 불가
+- 500: 서버 오류
+
 ---
 
 ### POST /vlm/embed
 
 이미지 임베딩 생성 및 저장 (관리자)
+
+**Note:** 인증이 필요하지 않습니다. 관리자 전용 기능입니다.
 
 **Form Data:**
 
@@ -1221,11 +1361,17 @@ TTS 스트리밍
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
+
 ---
 
 ### GET /vlm/places/nearby
 
 주변 장소 조회
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Query Parameters:**
 
@@ -1253,11 +1399,17 @@ TTS 스트리밍
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
+
 ---
 
 ### GET /vlm/health
 
 VLM 서비스 상태 확인
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Response:**
 
@@ -1339,7 +1491,7 @@ VLM 서비스 상태 확인
 | limit | integer | 선택 | 결과 개수 (기본: 3, 상위 3개 추천) |
 | quest_only | boolean | 선택 | 퀘스트 장소만 (기본: true) |
 
-**Note:** `image` 또는 `images` 중 하나는 반드시 제공해야 합니다.
+**Note:** `image` 또는 `images` 중 하나는 반드시 제공해야 합니다. `images` 배열은 최대 3개까지 허용됩니다.
 
 **Response:**
 
@@ -1390,11 +1542,19 @@ VLM 서비스 상태 확인
 - **임계값**: 유사도 임계값이 0.2로 낮춰져 상위 3개 추천에 최적화되었습니다.
 - **filter.start_location**: `start_latitude`와 `start_longitude`가 제공될 때만 포함됩니다 (null일 수 있음)
 
+**Status Codes:**
+- 200: 성공
+- 400: 잘못된 요청 (`image` 또는 `images`가 없거나, `images` 배열이 3개 초과, 또는 이미지 임베딩 생성 실패)
+- 401: 인증 실패
+- 500: 서버 오류
+
 ---
 
 ### GET /recommend/nearby-quests
 
 주변 퀘스트 추천
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Query Parameters:**
 
@@ -1436,14 +1596,21 @@ VLM 서비스 상태 확인
 ```
 
 **Notes:**
+- `is_active = TRUE`인 퀘스트만 검색됩니다
 - 거리순으로 정렬됩니다 (`distance_km` 오름차순)
 - `distance_km`는 사용자 위치와 퀘스트 위치 간의 거리입니다 (km 단위)
+
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
 
 ---
 
 ### GET /recommend/quests/category/{category}
 
 카테고리별 퀘스트 조회
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Path Parameters:**
 
@@ -1474,11 +1641,17 @@ VLM 서비스 상태 확인
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
+
 ---
 
 ### GET /recommend/quests/high-reward
 
 포인트가 높은 퀘스트 추천 (Wanna Get Some Mint? 섹션용)
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Query Parameters:**
 
@@ -1524,11 +1697,17 @@ VLM 서비스 상태 확인
 - `is_active = TRUE`인 퀘스트만 반환됩니다
 - `distance_km`는 `latitude`와 `longitude`가 제공될 때만 계산됩니다
 
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
+
 ---
 
 ### GET /recommend/quests/newest
 
 최신 퀘스트 추천 (See What's New in Seoul 섹션용)
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Query Parameters:**
 
@@ -1581,6 +1760,8 @@ VLM 서비스 상태 확인
 
 퀘스트 상세 정보 (장소 + 퀴즈 포함)
 
+**Note:** 인증이 필요하지 않습니다.
+
 **Path Parameters:**
 
 | Field | Type | Required | Description |
@@ -1632,6 +1813,11 @@ VLM 서비스 상태 확인
 **Notes:**
 - `place`가 없으면 `null`이 반환됩니다
 - `quizzes` 배열은 비어있을 수 있습니다
+
+**Status Codes:**
+- 200: 성공
+- 404: 퀘스트를 찾을 수 없음
+- 500: 서버 오류
 
 ---
 
@@ -1692,6 +1878,8 @@ VLM 서비스 상태 확인
 
 추천 시스템 통계
 
+**Note:** 인증이 필요하지 않습니다.
+
 **Response:**
 
 ```json
@@ -1704,6 +1892,10 @@ VLM 서비스 상태 확인
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
+
 ---
 
 ## Map Endpoints
@@ -1711,6 +1903,8 @@ VLM 서비스 상태 확인
 ### POST /map/search
 
 장소명으로 퀘스트/장소 검색
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Request Body:**
 
@@ -1766,14 +1960,21 @@ VLM 서비스 상태 확인
 
 **Notes:**
 - 검색어는 `quests.name`, `places.name`, `places.metadata->>'rag_text'`에서 검색됩니다
+- `is_active = TRUE`인 퀘스트만 검색됩니다
 - 거리 순으로 정렬됩니다 (위도/경도 제공 시)
 - 반경 필터링은 위도/경도가 제공될 때만 적용됩니다
+
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
 
 ---
 
 ### POST /map/filter
 
 필터 조건으로 퀘스트/장소 검색
+
+**Note:** 인증이 필요하지 않습니다.
 
 **Request Body:**
 
@@ -1837,10 +2038,15 @@ VLM 서비스 상태 확인
 ```
 
 **Notes:**
+- `is_active = TRUE`인 퀘스트만 검색됩니다
 - `sort_by`:
   - `"nearest"`: 거리순 (위도/경도 제공 시), 없으면 reward_point 내림차순
   - `"rewarded"`: reward_point 내림차순
   - `"newest"`: created_at 내림차순
+
+**Status Codes:**
+- 200: 성공
+- 500: 서버 오류
 
 ---
 
@@ -1855,7 +2061,7 @@ VLM 서비스 상태 확인
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| quest_ids | array[integer] | 선택 | 선택한 퀘스트 ID 목록 (walk 거리 계산용) |
+| quest_ids | array[integer] | 선택 | 선택한 퀘스트 ID 목록 (walk 거리 계산용, 예: `?quest_ids=1&quest_ids=2&quest_ids=3`) |
 | user_latitude | float | 선택 | 사용자 현재 위도 (walk 거리 계산용) |
 | user_longitude | float | 선택 | 사용자 현재 경도 (walk 거리 계산용) |
 
@@ -2068,6 +2274,11 @@ VLM 서비스 상태 확인
 - `is_read_only`: 여행 일정/퀘스트 채팅은 true (조회만 가능)
 - `time_ago`: "방금", "5분전", "2시간전", "01월 01일" 형식
 
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
+
 ---
 
 ### GET /ai-station/chat-session/{session_id}
@@ -2125,7 +2336,14 @@ VLM 서비스 상태 확인
   - `quest_step`: 퀘스트 단계
   - `prompt_step_text`: 프롬프트 단계 텍스트
   - `options`: 옵션 정보 (예: `{"quest_ids": [1, 2, 3, 4]}`)
-- `function_type`이 `vlm_chat`인 경우, `image_url` 필드가 포함됩니다
+- `function_type`이 `vlm_chat`인 경우, `image_url` 필드가 포함됩니다 (다른 타입에서는 `null`일 수 있음)
+- 모든 채팅 항목에는 `image_url` 필드가 포함되지만, `vlm_chat`가 아닌 경우에는 `null`입니다
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 404: 세션을 찾을 수 없음
+- 500: 서버 오류
 
 ---
 
@@ -2167,6 +2385,13 @@ VLM 서비스 상태 확인
 - `chat_session_id`가 있으면 기존 세션에 추가
 - 첫 번째 메시지일 경우 `user_message`가 세션 제목으로 저장됨
 - **특정 장소 환영 메시지**: RAG 검색 결과에서 첫 번째 장소를 감지하여, 해당 장소에 대한 환영 메시지를 생성합니다 (예: "경복궁에 오신 것을 환영합니다")
+- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다
+- `enable_tts=true`일 때만 `audio` 또는 `audio_url`이 포함됩니다
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
 
 ---
 
@@ -2207,7 +2432,8 @@ VLM 서비스 상태 확인
   "landmark": "경복궁",
   "quest_id": 1,
   "session_id": "uuid",
-  "audio": "base64_encoded_audio_or_null"
+  "audio": "base64_encoded_audio_or_null",
+  "audio_url": "https://storage.url/audio.mp3_or_null"
 }
 ```
 
@@ -2217,6 +2443,14 @@ VLM 서비스 상태 확인
 - **히스토리 저장**: 히스토리에 저장되지만 `is_read_only = true` 로 표시되므로 이어 쓰기는 불가합니다.
 - **향후 RAG 검색**: 향후 RAG 검색을 추가할 경우에도 반드시 `quest_id` 또는 `place_id`로 필터링해야 합니다.
 - **DB 분리 설계**: 추후 고도화를 위해 Quest별로 독립적인 벡터 스토어 네임스페이스나 RAG 데이터베이스를 사용할 수 있도록 설계되었습니다.
+- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다 (응답 예시에는 둘 다 표시되지만 실제로는 하나만 반환됨)
+- `enable_tts=true`일 때만 `audio` 또는 `audio_url`이 포함됩니다
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 404: 퀘스트를 찾을 수 없음
+- 500: 서버 오류
 
 ---
 
@@ -2262,7 +2496,8 @@ VLM 서비스 상태 확인
   "image_url": "https://storage.url/image.jpg",
   "quest_id": 1,
   "session_id": "uuid",
-  "audio": "base64_encoded_audio_or_null"
+  "audio": "base64_encoded_audio_or_null",
+  "audio_url": "https://storage.url/audio.mp3_or_null"
 }
 ```
 
@@ -2273,6 +2508,14 @@ VLM 서비스 상태 확인
 - **히스토리 저장**: 히스토리에서는 `function_type = vlm_chat`, `mode = quest`, `is_read_only = true`로 관리됩니다.
 - **향후 RAG 검색**: 향후 RAG 검색을 추가할 경우에도 반드시 `quest_id` 또는 `place_id`로 필터링해야 합니다.
 - **DB 분리 설계**: 추후 고도화를 위해 Quest별로 독립적인 벡터 스토어 네임스페이스나 RAG 데이터베이스를 사용할 수 있도록 설계되었습니다.
+- `prefer_url=true`일 때는 `audio_url`만 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다
+- `enable_tts=true`일 때만 `audio` 또는 `audio_url`이 포함됩니다
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 404: 퀘스트를 찾을 수 없음
+- 500: 서버 오류
 
 ---
 
@@ -2303,6 +2546,14 @@ STT + TTS 통합 엔드포인트
   "audio": "base64_encoded_audio"
 }
 ```
+
+**Notes:**
+- `prefer_url=true`일 때는 `audio_url`과 `audio` 모두 포함되고, `prefer_url=false`일 때는 `audio`만 포함됩니다 (`audio_url`은 null)
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
 
 ---
 
@@ -2433,11 +2684,16 @@ STT + TTS 통합 엔드포인트
 - **필수 방문 장소**: `must_visit_place_id`가 지정되면 항상 추천 결과에 포함되며, 출발 위치 기준 거리순으로 자연스럽게 배치됨 (1~4번째 중 적절한 위치)
 - **야경 특별 장소**: 마지막 장소(4번째)는 자동으로 야경 특별 장소로 추천됩니다 (metadata, description, name에서 야경 관련 키워드 검색). 각 퀘스트의 `is_night_view` 필드로 야경 장소 여부를 확인할 수 있습니다
 - **검색 반경 설정**: `radius_km` 파라미터로 검색 반경을 설정할 수 있습니다 (기본: 15.0km). anywhere 클릭 시 사용자가 원하는 거리를 선택하여 전달하면 해당 거리 내에서 추천합니다
-- **점수 계산**: 각 퀘스트는 카테고리 매칭(30%), 거리(25%), 다양성(20%), 인기도(15%), 포인트(10%) 가중치로 종합 점수를 계산합니다
+- **점수 계산**: 각 퀘스트는 카테고리 매칭(35%), 다양성(25%), 거리(15%), 인기도(15%), 포인트(10%) 가중치로 종합 점수를 계산합니다
   - 테마 다중 선택 시 여러 테마 중 가장 높은 매칭 점수를 사용
 - **거리 정보**: `distance_from_start`는 출발 지점으로부터의 거리(km)입니다
 - **중복 체크**: `place_id` 기준으로 중복된 장소는 제외됩니다
 - **최대 4개 제한**: 추천 결과는 최대 4개 퀘스트로 제한됩니다
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
 
 ---
 
@@ -2486,6 +2742,11 @@ STT + TTS 통합 엔드포인트
 - `avg_distance_km`: 평균 거리 (km)
 - 방문자 수 기준 내림차순 정렬
 
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
+
 ---
 
 ### GET /analytics/location-stats/quest
@@ -2530,6 +2791,11 @@ STT + TTS 통합 엔드포인트
 - `visitor_count`: 방문자 수 (중복 제거)
 - `visit_count`: 방문 횟수 (전체)
 - 방문 횟수 기준 내림차순 정렬
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
 
 ---
 
@@ -2576,6 +2842,11 @@ STT + TTS 통합 엔드포인트
   - `week`: 주별 (예: "2024-W01")
 - 시간대 순서대로 정렬
 
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
+
 ---
 
 ### GET /analytics/location-stats/summary
@@ -2617,6 +2888,11 @@ STT + TTS 통합 엔드포인트
 - `total_quests`: 방문된 퀘스트 수 (중복 제거)
 - `total_districts`: 방문된 자치구 수 (중복 제거)
 - `avg_distance_km`: 평균 거리 (km)
+
+**Status Codes:**
+- 200: 성공
+- 401: 인증 실패
+- 500: 서버 오류
 
 ---
 
@@ -2752,6 +3028,9 @@ API 루트 엔드포인트
 }
 ```
 
+**Status Codes:**
+- 200: 성공
+
 ---
 
 ### GET /health
@@ -2765,6 +3044,9 @@ API 루트 엔드포인트
   "status": "healthy"
 }
 ```
+
+**Status Codes:**
+- 200: 성공
 
 ---
 
