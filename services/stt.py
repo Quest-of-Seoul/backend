@@ -123,8 +123,7 @@ def speech_to_text_from_base64(
     try:
         audio_bytes = base64.b64decode(audio_base64)
         
-        # 오디오 길이 검증 (너무 짧은 오디오는 STT 실패 가능성이 높음)
-        if len(audio_bytes) < 100:  # 약 100 bytes 미만은 너무 짧음
+        if len(audio_bytes) < 100:
             logger.warning(f"Audio too short for STT: {len(audio_bytes)} bytes")
             return None
         

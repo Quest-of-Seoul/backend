@@ -803,13 +803,11 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
     try:
         logger.info(f"STT+TTS request: {user_id}")
         
-        # STT 수행
         transcribed_text = speech_to_text_from_base64(
             audio_base64=request.audio,
             language_code=request.language_code
         )
         
-        # STT 실패 시에만 에러 반환 (빈 문자열 또는 None인 경우)
         if not transcribed_text or not transcribed_text.strip():
             logger.warning(f"STT transcription failed or empty: transcribed_text='{transcribed_text}'")
             raise HTTPException(
@@ -820,7 +818,6 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
         transcribed_text = transcribed_text.strip()
         logger.info(f"STT transcribed text: '{transcribed_text}' ({len(transcribed_text)} chars)")
         
-        # 전사 텍스트 길이 검증 (2자 이하인 경우 TTS 건너뛰기)
         text_length = len(transcribed_text)
         if text_length <= 2:
             logger.warning(f"Transcribed text is too short ({text_length} chars), skipping TTS")
@@ -832,7 +829,6 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
                 "warning": "Transcribed text is too short for TTS generation"
             }
         
-        # TTS 생성 시도 (실패해도 STT 결과는 반환)
         audio_url = None
         audio_base64 = None
         tts_error_message = None
@@ -852,7 +848,6 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
                 )
                 logger.info(f"TTS generated: base64={audio_base64 is not None}")
             
-            # TTS 생성 실패 확인
             if not audio_base64:
                 tts_error_message = "TTS generation returned None"
                 logger.warning(tts_error_message)
@@ -860,7 +855,6 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
             tts_error_message = f"TTS generation failed: {str(tts_error)}"
             logger.error(f"TTS generation error: {tts_error}", exc_info=True)
         
-        # STT 성공 시 항상 전사 텍스트 반환 (TTS 실패해도)
         response = {
             "success": True,
             "transcribed_text": transcribed_text,
@@ -868,7 +862,6 @@ async def stt_and_tts(request: STTTTSRequest, user_id: str = Depends(get_current
             "audio": audio_base64
         }
         
-        # TTS 실패 시 warning 필드 추가
         if tts_error_message:
             response["warning"] = tts_error_message
         
@@ -890,7 +883,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         
         must_visit_quest = None
         if request.must_visit_quest_id:
-            # must_visit_quest_id가 있으면 직접 quest를 가져옴
             quest_result = db.table("quests").select("*, places(*)").eq("id", request.must_visit_quest_id).execute()
             if quest_result.data and len(quest_result.data) > 0:
                 must_visit_quest = dict(quest_result.data[0])
@@ -902,7 +894,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                         must_visit_quest["district"] = place.get("district")
                         must_visit_quest["place_image_url"] = place.get("image_url")
         elif request.must_visit_place_id:
-            # must_visit_place_id가 있으면 place를 통해 quest를 가져옴
             place_result = db.table("places").select("*, quests(*)").eq("id", request.must_visit_place_id).execute()
             if place_result.data and len(place_result.data) > 0:
                 place = place_result.data[0]
@@ -1387,9 +1378,7 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                         final_quests.append(quest)
                 
                 if must_visit_quest_id and not any(q.get("id") == must_visit_quest_id for q in final_quests):
-                    # must_visit_quest를 직접 추가
                     if must_visit_quest:
-                        # must_visit_quest에 distance_from_start 계산
                         if start_lat and start_lon:
                             quest_lat = must_visit_quest.get("latitude")
                             quest_lon = must_visit_quest.get("longitude")
@@ -1409,7 +1398,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                         else:
                             must_visit_quest["distance_from_start"] = float('inf')
                         
-                        # distance_from_start 기준으로 적절한 위치에 삽입
                         inserted = False
                         for i, q in enumerate(final_quests):
                             if q.get("distance_from_start", float('inf')) > must_visit_quest.get("distance_from_start", float('inf')):
@@ -1448,9 +1436,7 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
                 remaining_count = 3
                 
-                # must_visit_quest를 먼저 추가
                 if must_visit_quest_id and must_visit_quest:
-                    # must_visit_quest에 distance_from_start 계산
                     if start_lat and start_lon:
                         quest_lat = must_visit_quest.get("latitude")
                         quest_lon = must_visit_quest.get("longitude")
@@ -1557,9 +1543,7 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
             remaining_count = 3
             
-            # must_visit_quest를 먼저 추가
             if must_visit_quest_id and must_visit_quest:
-                # must_visit_quest에 distance_from_start 계산
                 if start_lat and start_lon:
                     quest_lat = must_visit_quest.get("latitude")
                     quest_lon = must_visit_quest.get("longitude")
