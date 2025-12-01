@@ -1332,8 +1332,16 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         if use_ai_recommendation and len(scored_quests) >= 4:
             from services.ai import generate_route_recommendation
             
+            # must_visit_quest를 candidate_quests에 명시적으로 포함
+            candidate_quests = scored_quests[:20].copy()
+            if must_visit_quest:
+                must_visit_quest_id = must_visit_quest.get("id")
+                # candidate_quests에 must_visit_quest가 없으면 추가
+                if not any(q.get("id") == must_visit_quest_id for q in candidate_quests):
+                    candidate_quests.insert(0, must_visit_quest)
+            
             ai_recommended = generate_route_recommendation(
-                candidate_quests=scored_quests[:20],
+                candidate_quests=candidate_quests,
                 preferences=request.preferences,
                 completed_quest_ids=completed_quest_ids,
                 language="en"
@@ -1346,7 +1354,7 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                     place_id = quest.get("place_id")
                     
                     quest_with_place = None
-                    for scored_quest in scored_quests:
+                    for scored_quest in candidate_quests:
                         if scored_quest.get("id") == quest_id:
                             quest_with_place = scored_quest
                             break
@@ -1371,42 +1379,38 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 night_quest_in_list = None
                 must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
                 
+                # must_visit_quest를 먼저 추가 (우선순위 보장)
+                if must_visit_quest_id and must_visit_quest:
+                    if start_lat and start_lon:
+                        quest_lat = must_visit_quest.get("latitude")
+                        quest_lon = must_visit_quest.get("longitude")
+                        if quest_lat and quest_lon:
+                            R = 6371
+                            lat1_rad = math.radians(start_lat)
+                            lat2_rad = math.radians(float(quest_lat))
+                            delta_lat = math.radians(float(quest_lat) - start_lat)
+                            delta_lon = math.radians(float(quest_lon) - start_lon)
+                            a = (math.sin(delta_lat / 2) ** 2 + 
+                                 math.cos(lat1_rad) * math.cos(lat2_rad) * 
+                                 math.sin(delta_lon / 2) ** 2)
+                            c = 2 * math.asin(math.sqrt(a))
+                            must_visit_quest["distance_from_start"] = R * c
+                        else:
+                            must_visit_quest["distance_from_start"] = float('inf')
+                    else:
+                        must_visit_quest["distance_from_start"] = float('inf')
+                    
+                    final_quests.append(must_visit_quest)
+                    logger.info(f"Added must_visit_quest (id: {must_visit_quest_id}) to final_quests (priority)")
+                
                 for quest in recommended_quests:
+                    # must_visit_quest는 이미 추가했으므로 중복 제외
+                    if must_visit_quest_id and quest.get("id") == must_visit_quest_id:
+                        continue
                     if is_night_view_place(quest):
                         night_quest_in_list = quest
                     else:
                         final_quests.append(quest)
-                
-                if must_visit_quest_id and not any(q.get("id") == must_visit_quest_id for q in final_quests):
-                    if must_visit_quest:
-                        if start_lat and start_lon:
-                            quest_lat = must_visit_quest.get("latitude")
-                            quest_lon = must_visit_quest.get("longitude")
-                            if quest_lat and quest_lon:
-                                R = 6371
-                                lat1_rad = math.radians(start_lat)
-                                lat2_rad = math.radians(float(quest_lat))
-                                delta_lat = math.radians(float(quest_lat) - start_lat)
-                                delta_lon = math.radians(float(quest_lon) - start_lon)
-                                a = (math.sin(delta_lat / 2) ** 2 + 
-                                     math.cos(lat1_rad) * math.cos(lat2_rad) * 
-                                     math.sin(delta_lon / 2) ** 2)
-                                c = 2 * math.asin(math.sqrt(a))
-                                must_visit_quest["distance_from_start"] = R * c
-                            else:
-                                must_visit_quest["distance_from_start"] = float('inf')
-                        else:
-                            must_visit_quest["distance_from_start"] = float('inf')
-                        
-                        inserted = False
-                        for i, q in enumerate(final_quests):
-                            if q.get("distance_from_start", float('inf')) > must_visit_quest.get("distance_from_start", float('inf')):
-                                final_quests.insert(i, must_visit_quest)
-                                inserted = True
-                                break
-                        if not inserted:
-                            final_quests.append(must_visit_quest)
-                        logger.info(f"Added must_visit_quest (id: {must_visit_quest_id}) to final_quests")
                 
                 if night_quest_in_list:
                     if len(final_quests) < 4:
@@ -1415,6 +1419,9 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                     for quest in regular_quests:
                         if len(final_quests) >= 4:
                             break
+                        # must_visit_quest는 이미 추가했으므로 중복 제외
+                        if must_visit_quest_id and quest.get("id") == must_visit_quest_id:
+                            continue
                         place_id = quest.get("place_id")
                         if any(rq.get("place_id") == place_id for rq in final_quests):
                             continue
@@ -1424,11 +1431,15 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                     for quest in regular_quests:
                         if len(final_quests) >= 4:
                             break
+                        # must_visit_quest는 이미 추가했으므로 중복 제외
+                        if must_visit_quest_id and quest.get("id") == must_visit_quest_id:
+                            continue
                         place_id = quest.get("place_id")
                         if any(rq.get("place_id") == place_id for rq in final_quests):
                             continue
                         final_quests.append(quest)
                 
+                # must_visit_quest가 포함된 상태에서 최대 4개까지
                 recommended_quests = final_quests[:4]
                 logger.info("Using AI-based recommendation")
             else:
