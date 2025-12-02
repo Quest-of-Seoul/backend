@@ -1007,15 +1007,25 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         
         logger.info(f"Using search_radius: {search_radius}km (request.radius_km={request.radius_km})")
         
-        if request.latitude and request.longitude:
+        search_lat = request.start_latitude or request.latitude
+        search_lon = request.start_longitude or request.longitude
+        
+        logger.info(f"Search location: ({search_lat}, {search_lon}) - start_lat/lon: ({request.start_latitude}, {request.start_longitude}), lat/lon: ({request.latitude}, {request.longitude})")
+        
+        if search_lat and search_lon:
             from routers.recommend import get_nearby_quests_route
             nearby_result = await get_nearby_quests_route(
-                latitude=request.latitude,
-                longitude=request.longitude,
+                latitude=search_lat,
+                longitude=search_lon,
                 radius_km=search_radius,
-                limit=50
+                limit=200
             )
             candidate_quests = nearby_result.get("quests", [])
+            logger.info(f"Found {len(candidate_quests)} quests within {search_radius}km from ({search_lat}, {search_lon})")
+            if len(candidate_quests) > 0:
+                sample_distances = [q.get("distance_km", "N/A") for q in candidate_quests[:3]]
+                max_distance = max([q.get("distance_km", 0) for q in candidate_quests if q.get("distance_km")])
+                logger.info(f"Sample distances from search location: {sample_distances}, Max distance: {max_distance}km")
         else:
             quests_result = db.table("quests").select("*, places(*)").eq("is_active", True).limit(50).execute()
             candidate_quests = []
@@ -1207,13 +1217,15 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
             reward_point = quest.get("reward_point", 100)
             
             category_score = calculate_category_score(quest_category, preferred_categories)
+            distance_lat = request.start_latitude or request.latitude
+            distance_lon = request.start_longitude or request.longitude
             distance_score = calculate_distance_score(
-                request.latitude or 37.5665, 
-                request.longitude or 126.9780,
+                distance_lat or 37.5665, 
+                distance_lon or 126.9780,
                 float(quest_lat) if quest_lat else None,
                 float(quest_lon) if quest_lon else None,
                 max_radius=search_radius
-            ) if request.latitude and request.longitude else 0.5
+            ) if (distance_lat and distance_lon) else 0.5
             popularity_score = calculate_popularity_score(completion_count)
             diversity_score = calculate_diversity_score(quest_category, completed_categories)
             reward_score = calculate_reward_score(reward_point)
@@ -1255,6 +1267,124 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         start_lat = request.start_latitude or request.latitude
         start_lon = request.start_longitude or request.longitude
         
+        def calculate_distance_from_start(quest: dict) -> float:
+            if not (start_lat and start_lon):
+                return float('inf')
+            quest_lat = quest.get("latitude")
+            quest_lon = quest.get("longitude")
+            if not (quest_lat and quest_lon):
+                return float('inf')
+            
+            R = 6371
+            lat1_rad = math.radians(start_lat)
+            lat2_rad = math.radians(float(quest_lat))
+            delta_lat = math.radians(float(quest_lat) - start_lat)
+            delta_lon = math.radians(float(quest_lon) - start_lon)
+            
+            a = (math.sin(delta_lat / 2) ** 2 + 
+                 math.cos(lat1_rad) * math.cos(lat2_rad) * 
+                 math.sin(delta_lon / 2) ** 2)
+            c = 2 * math.asin(math.sqrt(a))
+            return R * c
+        
+        def ensure_distance_diversity(quests: list, num_zones: int, zone_boundaries: list, must_visit_quest: dict = None, min_distance_km: float = 0.0) -> list:
+            if len(quests) < 4:
+                return quests
+            
+            quest_zones = {}
+            for quest in quests:
+                dist = quest.get("distance_from_start", float('inf'))
+                if dist == float('inf'):
+                    continue
+                if dist < min_distance_km:
+                    continue
+                for zone_idx in range(num_zones):
+                    if zone_boundaries[zone_idx] <= dist < zone_boundaries[zone_idx + 1]:
+                        if zone_idx not in quest_zones:
+                            quest_zones[zone_idx] = []
+                        quest_zones[zone_idx].append(quest)
+                        break
+                if dist >= zone_boundaries[num_zones - 1] and dist <= zone_boundaries[num_zones]:
+                    if (num_zones - 1) not in quest_zones:
+                        quest_zones[num_zones - 1] = []
+                    quest_zones[num_zones - 1].append(quest)
+            
+            final_quests = []
+            zone_used = set()
+            must_visit_quest_id = must_visit_quest.get("id") if must_visit_quest else None
+            
+            # must_visit_quest가 있으면 먼저 추가
+            if must_visit_quest_id:
+                for quest in quests:
+                    if quest.get("id") == must_visit_quest_id:
+                        final_quests.append(quest)
+                        dist = quest.get("distance_from_start", float('inf'))
+                        if dist != float('inf') and dist >= min_distance_km:
+                            for zone_idx in range(num_zones):
+                                if zone_boundaries[zone_idx] <= dist < zone_boundaries[zone_idx + 1]:
+                                    zone_used.add(zone_idx)
+                                    break
+                            if dist >= zone_boundaries[num_zones - 1] and dist <= zone_boundaries[num_zones]:
+                                zone_used.add(num_zones - 1)
+                        break
+            
+            for zone_idx in range(num_zones):
+                if zone_idx in zone_used:
+                    continue
+                if zone_idx in quest_zones and len(quest_zones[zone_idx]) > 0:
+                    zone_quests = sorted(quest_zones[zone_idx], key=lambda x: x.get("recommendation_score", 0), reverse=True)
+                    selected = None
+                    for q in zone_quests:
+                        if q.get("id") != must_visit_quest_id and q not in final_quests:
+                            selected = q
+                            break
+                    if selected:
+                        final_quests.append(selected)
+                        zone_used.add(zone_idx)
+                        if len(final_quests) >= 4:
+                            break
+            
+            for quest in sorted(quests, key=lambda x: x.get("recommendation_score", 0), reverse=True):
+                if len(final_quests) >= 4:
+                    break
+                if quest not in final_quests:
+                    final_quests.append(quest)
+            
+            if len(final_quests) > 0:
+                distances = [round(q.get("distance_from_start", 0), 2) for q in final_quests]
+                logger.info(f"Final recommended quests with distance diversity: {distances}")
+            
+            return final_quests[:4]
+        
+        if search_radius and (start_lat and start_lon):
+            if search_radius <= 5:
+                min_distance_km = 0.0
+            elif search_radius <= 10:
+                min_distance_km = 1.0
+            elif search_radius <= 15:
+                min_distance_km = 2.0
+            else:
+                min_distance_km = 3.0
+            
+            filtered_scored_quests = []
+            distances_before_filter = []
+            for quest in scored_quests:
+                distance = calculate_distance_from_start(quest)
+                distances_before_filter.append((quest.get("id"), quest.get("name"), round(distance, 2)))
+                if distance >= min_distance_km and distance <= search_radius:
+                    filtered_scored_quests.append(quest)
+                elif must_visit_quest and quest.get("id") == must_visit_quest.get("id"):
+                    filtered_scored_quests.append(quest)
+            
+            logger.info(f"Before filtering: {len(scored_quests)} quests. Sample distances: {distances_before_filter[:5]}")
+            if min_distance_km > 0:
+                logger.info(f"Applying min_distance filter: {min_distance_km}km (excluding quests closer than this)")
+            scored_quests = filtered_scored_quests
+            logger.info(f"After filtering: {len(scored_quests)} quests within {min_distance_km if min_distance_km > 0 else 0}-{search_radius}km from location ({start_lat}, {start_lon})")
+            if len(scored_quests) > 0:
+                sample_filtered_distances = [(q.get("id"), q.get("name"), round(calculate_distance_from_start(q), 2)) for q in scored_quests[:5]]
+                logger.info(f"Sample filtered quest distances: {sample_filtered_distances}")
+        
         def is_night_view_place(quest: dict) -> bool:
             place = quest.get("places")
             if isinstance(place, list) and len(place) > 0:
@@ -1295,24 +1425,6 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                 regular_quests.append(must_visit_quest)
         
         if start_lat and start_lon:
-            def calculate_distance_from_start(quest: dict) -> float:
-                quest_lat = quest.get("latitude")
-                quest_lon = quest.get("longitude")
-                if not (quest_lat and quest_lon):
-                    return float('inf')
-                
-                R = 6371
-                lat1_rad = math.radians(start_lat)
-                lat2_rad = math.radians(float(quest_lat))
-                delta_lat = math.radians(float(quest_lat) - start_lat)
-                delta_lon = math.radians(float(quest_lon) - start_lon)
-                
-                a = (math.sin(delta_lat / 2) ** 2 + 
-                     math.cos(lat1_rad) * math.cos(lat2_rad) * 
-                     math.sin(delta_lon / 2) ** 2)
-                c = 2 * math.asin(math.sqrt(a))
-                return R * c
-            
             for quest in regular_quests:
                 quest["distance_from_start"] = calculate_distance_from_start(quest)
             regular_quests.sort(key=lambda x: (
@@ -1332,8 +1444,99 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
         if use_ai_recommendation and len(scored_quests) >= 4:
             from services.ai import generate_route_recommendation
             
-            # must_visit_quest를 candidate_quests에 명시적으로 포함
-            candidate_quests = scored_quests[:20].copy()
+            zone_boundaries = None
+            min_distance_km = 0.0
+            
+            if start_lat and start_lon and search_radius:
+                num_zones = 4
+                if search_radius <= 5:
+                    min_distance_km = 0.0
+                    zone_boundaries = [0.0, 0.5, 2.0, 3.5, 5.0]
+                elif search_radius <= 10:
+                    min_distance_km = 0.5
+                    zone_boundaries = [0.0, 2.0, 4.5, 7.0, 10.0]
+                elif search_radius <= 15:
+                    min_distance_km = 1.0
+                    zone_boundaries = [0.0, 3.0, 6.0, 10.0, 15.0]
+                elif search_radius <= 20:
+                    min_distance_km = 2.0
+                    zone_boundaries = [0.0, 4.0, 8.0, 14.0, 20.0]
+                elif search_radius <= 25:
+                    min_distance_km = 2.0
+                    zone_boundaries = [0.0, 5.0, 10.0, 17.0, 25.0]
+                else:  # 30km
+                    min_distance_km = 2.0
+                    zone_boundaries = [0.0, 5.0, 12.0, 21.0, 30.0]
+                
+                if search_radius < zone_boundaries[-1]:
+                    zone_boundaries[-1] = search_radius
+                
+                for quest in scored_quests:
+                    quest["distance_from_start"] = calculate_distance_from_start(quest)
+                
+                filtered_by_distance = []
+                for quest in scored_quests:
+                    dist = quest.get("distance_from_start", float('inf'))
+                    if dist == float('inf'):
+                        continue
+                    if dist >= min_distance_km and dist <= search_radius:
+                        filtered_by_distance.append(quest)
+                
+                logger.info(f"Filtered quests for AI: {len(scored_quests)} -> {len(filtered_by_distance)} (min_distance: {min_distance_km}km, zone_boundaries: {zone_boundaries})")
+                
+                distance_zones = {i: [] for i in range(num_zones)}
+                for quest in filtered_by_distance:
+                    dist = quest.get("distance_from_start", float('inf'))
+                    if dist == float('inf'):
+                        continue
+                    for zone_idx in range(num_zones):
+                        if zone_boundaries[zone_idx] <= dist < zone_boundaries[zone_idx + 1]:
+                            distance_zones[zone_idx].append(quest)
+                            break
+                    if dist >= zone_boundaries[num_zones - 1] and dist <= zone_boundaries[num_zones]:
+                        distance_zones[num_zones - 1].append(quest)
+                
+                for zone_idx in range(num_zones):
+                    distance_zones[zone_idx].sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
+                
+                quests_per_zone = max(15, len(filtered_by_distance) // num_zones)
+                candidate_quests = []
+                for zone_idx in range(num_zones):
+                    zone_start = zone_boundaries[zone_idx]
+                    zone_end = zone_boundaries[zone_idx + 1]
+                    zone_quests = distance_zones[zone_idx][:quests_per_zone]
+                    candidate_quests.extend(zone_quests)
+                    if len(zone_quests) > 0:
+                        sample_dist = [round(q.get("distance_from_start", 0), 2) for q in zone_quests[:3]]
+                        logger.info(f"Zone {zone_idx} ({zone_start:.1f}-{zone_end:.1f}km): {len(zone_quests)} quests, sample distances: {sample_dist}")
+                
+                final_candidates = []
+                target_per_zone = max(12, 50 // num_zones)
+                
+                for zone_idx in range(num_zones):
+                    zone_quests = distance_zones[zone_idx][:target_per_zone]
+                    final_candidates.extend(zone_quests)
+                
+                final_candidates.sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
+                candidate_quests = final_candidates[:50]
+                
+                if len(candidate_quests) > 0:
+                    sample_distances = [(q.get("id"), q.get("name"), round(q.get("distance_from_start", 0), 2)) for q in candidate_quests[:10]]
+                    zone_distribution = {}
+                    for quest in candidate_quests:
+                        dist = quest.get("distance_from_start", float('inf'))
+                        if dist != float('inf'):
+                            for zone_idx in range(num_zones):
+                                if zone_boundaries[zone_idx] <= dist < zone_boundaries[zone_idx + 1]:
+                                    zone_distribution[zone_idx] = zone_distribution.get(zone_idx, 0) + 1
+                                    break
+                            if dist >= zone_boundaries[num_zones - 1] and dist <= zone_boundaries[num_zones]:
+                                zone_distribution[num_zones - 1] = zone_distribution.get(num_zones - 1, 0) + 1
+                    logger.info(f"Selected {len(candidate_quests)} candidate quests with distance diversity (zones: {zone_boundaries}): {sample_distances}")
+                    logger.info(f"Zone distribution: {zone_distribution}")
+            else:
+                sorted_by_score = sorted(scored_quests, key=lambda x: x.get("recommendation_score", 0), reverse=True)
+                candidate_quests = sorted_by_score[:50].copy()
             if must_visit_quest:
                 must_visit_quest_id = must_visit_quest.get("id")
                 # candidate_quests에 must_visit_quest가 없으면 추가
@@ -1371,9 +1574,14 @@ async def recommend_route(request: RouteRecommendRequest, user_id: str = Depends
                                 quest_with_place["place_image_url"] = place.get("image_url") if isinstance(place, dict) else None
                     
                     if quest_with_place:
+                        if start_lat and start_lon:
+                            quest_with_place["distance_from_start"] = calculate_distance_from_start(quest_with_place)
                         ai_quests_with_place.append(quest_with_place)
                 
-                recommended_quests = ai_quests_with_place[:4]
+                if start_lat and start_lon and search_radius and zone_boundaries:
+                    recommended_quests = ensure_distance_diversity(ai_quests_with_place, num_zones, zone_boundaries, must_visit_quest, min_distance_km)
+                else:
+                    recommended_quests = ai_quests_with_place[:4]
                 
                 final_quests = []
                 night_quest_in_list = None

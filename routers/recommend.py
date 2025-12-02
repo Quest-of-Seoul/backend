@@ -296,11 +296,15 @@ async def get_nearby_quests_route(
                 )
                 nearby_quests.append(formatted_quest)
         
-        nearby_quests.sort(key=lambda x: x.get("distance_km", float('inf')))
-        
-        nearby_quests = nearby_quests[:limit]
-        
-        logger.info(f"Found {len(nearby_quests)} nearby quests within {radius_km}km radius")
+        logger.info(f"Found {len(nearby_quests)} nearby quests within {radius_km}km radius from ({latitude}, {longitude})")
+        if len(nearby_quests) > 0:
+            distances = [q.get("distance_km") for q in nearby_quests if q.get("distance_km")]
+            if distances:
+                min_dist = min(distances)
+                max_dist = max(distances)
+                avg_dist = sum(distances) / len(distances)
+                sample_distances = [(q.get("id"), q.get("name"), q.get("distance_km")) for q in nearby_quests[:3]]
+                logger.info(f"Sample quest distances: {sample_distances}, Min: {round(min_dist, 2)}km, Max: {round(max_dist, 2)}km, Avg: {round(avg_dist, 2)}km")
         
         return {
             "success": True,

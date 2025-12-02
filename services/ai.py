@@ -192,7 +192,7 @@ def generate_route_recommendation(
     
     try:
         quest_info_list = []
-        for quest in candidate_quests[:20]:
+        for quest in candidate_quests[:50]:
             quest_info = {
                 "id": quest.get("id"),
                 "name": quest.get("name", ""),
@@ -204,6 +204,8 @@ def generate_route_recommendation(
                 "completion_count": quest.get("completion_count", 0),
                 "description": quest.get("description", "")[:200]
             }
+            if quest.get("distance_from_start") is not None and quest.get("distance_from_start") != float('inf'):
+                quest_info["distance_km"] = round(quest.get("distance_from_start", 0), 2)
             quest_info_list.append(quest_info)
         
         theme = preferences.get("theme") or preferences.get("category") or "Seoul Travel"
@@ -244,6 +246,7 @@ def generate_route_recommendation(
 3. Consider theme and preferred districts
 4. Arrange in efficient order considering travel distance and time
 5. Consider category diversity
+6. **IMPORTANT: Ensure distance diversity** - Select quests from different distance ranges (e.g., if radius is 20km, choose quests around 5km, 10km, 15km, 20km) to provide a varied travel experience. Avoid selecting all quests from the same distance range.
 
 Return in JSON format:
 {{
